@@ -1,2 +1,3 @@
-config/credentials.yaml
 venv
+
+config/credentials.yaml
