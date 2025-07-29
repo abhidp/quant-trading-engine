@@ -6,6 +6,6 @@ trading_params:
   starting_balance: 10000
   lookback_bars: 100000
   rsi_period: 14
-  rsi_oversold: 30
-  rsi_overbought: 70
+  rsi_oversold: 35
+  rsi_overbought: 65
   rsi_exit_level: 50
