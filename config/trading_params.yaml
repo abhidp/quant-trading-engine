@@ -9,3 +9,7 @@ trading_params:
   rsi_oversold: 35
   rsi_overbought: 65
   rsi_exit_level: 50
+  # ATR Stop Loss parameters
+  use_atr_stop: true
+  atr_period: 14
+  atr_multiplier: 2.0
