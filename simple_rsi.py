@@ -3,6 +3,9 @@ import pandas as pd
 import yaml
 import os
 import matplotlib.pyplot as plt
+import pickle
+import hashlib
+from datetime import datetime
 
 def calculate_rsi(prices, period):
     delta = prices.diff()
@@ -241,6 +244,69 @@ def load_params():
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
 
+def get_cache_filename(instrument, timeframe, start_date, end_date):
+    """Generate cache filename based on parameters"""
+    cache_key = f"{instrument}_{timeframe}_{start_date}_{end_date}"
+    cache_hash = hashlib.md5(cache_key.encode()).hexdigest()[:8]
+    return f"{instrument}_{timeframe}_{cache_hash}.pkl"
+
+def load_cached_data(cache_path):
+    """Load data from cache if it exists"""
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"Warning: Failed to load cache {cache_path}: {e}")
+    return None
+
+def save_to_cache(data, cache_path):
+    """Save data to cache"""
+    try:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, 'wb') as f:
+            pickle.dump(data, f)
+        print(f"Data cached to {cache_path}")
+    except Exception as e:
+        print(f"Warning: Failed to save cache {cache_path}: {e}")
+
+def get_historical_data(instrument, timeframe, start_date, end_date, use_cache=True, cache_dir='data/cache'):
+    """Get historical data with caching support"""
+    # Generate cache filename
+    cache_filename = get_cache_filename(instrument, timeframe, start_date, end_date)
+    cache_path = os.path.join(cache_dir, cache_filename)
+    
+    # Try to load from cache first
+    if use_cache:
+        cached_data = load_cached_data(cache_path)
+        if cached_data is not None:
+            print(f"Loaded data from cache: {cache_path}")
+            return cached_data
+    
+    # Convert string dates to datetime
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+    
+    print(f"Downloading data from MT5: {start_date} to {end_date}")
+    
+    # Get data from MT5
+    timeframe_mt5 = getattr(mt5, f'TIMEFRAME_{timeframe}')
+    bars = mt5.copy_rates_range(instrument, timeframe_mt5, start_dt, end_dt)
+    
+    if bars is None:
+        print(f"No data retrieved, error code = {mt5.last_error()}")
+        return None
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(bars)
+    df['time'] = pd.to_datetime(df['time'], unit='s')
+    
+    # Save to cache
+    if use_cache:
+        save_to_cache(df, cache_path)
+    
+    return df
+
 def main():
     # Load configuration
     mt5_config = load_credentials()
@@ -266,23 +332,20 @@ def main():
     
     print(f"MT5 connection established to {mt5_config['server']} (Account: {mt5_config['username']})")
     
-    # Get historical data for backtesting
-    timeframe = getattr(mt5, f'TIMEFRAME_{trading_params["timeframe"]}')
-    bars = mt5.copy_rates_from_pos(
+    # Get historical data using date range
+    df = get_historical_data(
         trading_params['instrument'],
-        timeframe,
-        0,
-        trading_params['lookback_bars']
+        trading_params['timeframe'],
+        trading_params['start_date'],
+        trading_params['end_date'],
+        use_cache=trading_params.get('use_cache', True),
+        cache_dir=trading_params.get('cache_dir', 'data/cache')
     )
     
-    if bars is None:
-        print("No data retrieved, error code =", mt5.last_error())
+    if df is None:
+        print("Failed to get historical data")
         mt5.shutdown()
         quit()
-    
-    # Convert to DataFrame
-    df = pd.DataFrame(bars)
-    df['time'] = pd.to_datetime(df['time'], unit='s')
     
     print(f"Loaded {len(df)} bars from {df['time'].iloc[0]} to {df['time'].iloc[-1]}")
     

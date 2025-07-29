@@ -1,14 +1,22 @@
 trading_params:
-  instrument: 'EURUSDx'
+  instrument: 'GBPUSDx'
   timeframe: 'M1'
-  lot_size: 0.01
+  lot_size: 0.50
   contract_size: 100000
   starting_balance: 10000
-  lookback_bars: 100000
+
+  # Date range for historical data
+  start_date: '2024-01-01'
+  end_date: '2025-07-29'
+
+  # Cache settings
+  use_cache: true
+  cache_dir: 'data/cache'
   rsi_period: 14
   rsi_oversold: 35
   rsi_overbought: 65
   rsi_exit_level: 50
+
   # ATR Stop Loss parameters
   use_atr_stop: true
   atr_period: 14
