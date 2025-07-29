@@ -26,6 +26,23 @@ def calculate_rsi(prices, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
+def calculate_atr(df, period=14):
+    """Calculate Average True Range (ATR)"""
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    
+    # Calculate True Range
+    hl = high - low
+    hc = abs(high - close.shift())
+    lc = abs(low - close.shift())
+    
+    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    
+    # Calculate ATR as exponential moving average of TR
+    atr = tr.ewm(span=period, adjust=False).mean()
+    return atr
+
 def load_credentials():
     config_path = os.path.join('config', 'credentials.yaml')
     try:
@@ -79,7 +96,7 @@ def get_current_positions(symbol):
         return []
     return list(positions)
 
-def place_buy_order(symbol, volume, deviation=20):
+def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
     """Place a BUY market order"""
     # Get symbol info to determine correct filling mode
     symbol_info = mt5.symbol_info(symbol)
@@ -109,6 +126,10 @@ def place_buy_order(symbol, volume, deviation=20):
         'type_filling': filling_mode,
     }
     
+    # Add stop loss if provided
+    if stop_loss is not None:
+        request['sl'] = stop_loss
+    
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         logger.error(f"BUY order failed, retcode={result.retcode}, comment={result.comment}")
@@ -117,7 +138,7 @@ def place_buy_order(symbol, volume, deviation=20):
     logger.info(f"BUY order successful: {result.order}, volume={volume}, price={result.price}")
     return result
 
-def place_sell_order(symbol, volume, deviation=20):
+def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
     """Place a SELL market order"""
     # Get symbol info to determine correct filling mode
     symbol_info = mt5.symbol_info(symbol)
@@ -146,6 +167,10 @@ def place_sell_order(symbol, volume, deviation=20):
         'type_time': mt5.ORDER_TIME_GTC,
         'type_filling': filling_mode,
     }
+    
+    # Add stop loss if provided
+    if stop_loss is not None:
+        request['sl'] = stop_loss
     
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -235,11 +260,15 @@ def live_trading_loop():
     rsi_overbought = params['rsi_overbought']
     rsi_exit_level = params['rsi_exit_level']
     lot_size = params['lot_size']
+    atr_period = params.get('atr_period', 14)
+    atr_multiplier = params.get('atr_multiplier', 2.0)
+    use_atr_stop = params.get('use_atr_stop', True)
     
     logger.info(f"Trading parameters loaded:")
     logger.info(f"Symbol: {symbol}, Timeframe: {params['timeframe']}")
     logger.info(f"RSI: {rsi_period} period, Entry: {rsi_oversold}/{rsi_overbought}, Exit: {rsi_exit_level}")
     logger.info(f"Position size: {lot_size} lots")
+    logger.info(f"ATR Stop Loss: {'Enabled' if use_atr_stop else 'Disabled'}, Period: {atr_period}, Multiplier: {atr_multiplier}")
     
     last_bar_time = None
     
@@ -265,6 +294,11 @@ def live_trading_loop():
                 current_rsi = df['rsi'].iloc[-1]
                 current_price = current_bar['close']
                 
+                # Calculate ATR if stop loss is enabled
+                if use_atr_stop:
+                    df['atr'] = calculate_atr(df, atr_period)
+                    current_atr = df['atr'].iloc[-1]
+                
                 bar_time = datetime.fromtimestamp(current_time)
                 logger.info(f"New bar [{bar_time}] - Price: {current_price:.5f}, RSI: {current_rsi:.2f}")
                 
@@ -276,13 +310,27 @@ def live_trading_loop():
                 # Entry signals
                 if current_rsi < rsi_oversold and not has_buy_position and not has_sell_position:
                     logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {rsi_oversold}")
-                    result = place_buy_order(symbol, lot_size)
+                    
+                    # Calculate stop loss if enabled
+                    stop_loss = None
+                    if use_atr_stop:
+                        stop_loss = current_price - (atr_multiplier * current_atr)
+                        logger.info(f"ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
+                    
+                    result = place_buy_order(symbol, lot_size, stop_loss)
                     if result:
                         logger.info(f"[SUCCESS] BUY position opened at {current_price:.5f}")
                 
                 elif current_rsi > rsi_overbought and not has_buy_position and not has_sell_position:
                     logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {rsi_overbought}")
-                    result = place_sell_order(symbol, lot_size)
+                    
+                    # Calculate stop loss if enabled
+                    stop_loss = None
+                    if use_atr_stop:
+                        stop_loss = current_price + (atr_multiplier * current_atr)
+                        logger.info(f"ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
+                    
+                    result = place_sell_order(symbol, lot_size, stop_loss)
                     if result:
                         logger.info(f"[SUCCESS] SELL position opened at {current_price:.5f}")
                 

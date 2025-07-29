@@ -12,6 +12,23 @@ def calculate_rsi(prices, period):
     loss = loss.replace(0, 0.0001)  # Small epsilon to avoid division by zero
     rs = gain / loss
     return 100 - (100 / (1 + rs))
+
+def calculate_atr(df, period=14):
+    """Calculate Average True Range (ATR)"""
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    
+    # Calculate True Range
+    hl = high - low
+    hc = abs(high - close.shift())
+    lc = abs(low - close.shift())
+    
+    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    
+    # Calculate ATR as exponential moving average of TR
+    atr = tr.ewm(span=period, adjust=False).mean()
+    return atr
 def generate_signals(df, rsi_oversold=30, rsi_overbought=70):
     df['signal'] = 0
     df['position'] = 0
@@ -22,11 +39,12 @@ def generate_signals(df, rsi_oversold=30, rsi_overbought=70):
     
     return df
 
-def backtest_strategy(df, lot_size, starting_balance, contract_size, exit_level=50):
+def backtest_strategy(df, lot_size, starting_balance, contract_size, exit_level=50, use_atr_stop=False, atr_multiplier=2.0):
     trades = []
     position = None
     equity_curve = [starting_balance]
     current_balance = starting_balance
+    stop_loss_hits = 0
     
     for i in range(len(df)):
         current_row = df.iloc[i]
@@ -37,21 +55,82 @@ def backtest_strategy(df, lot_size, starting_balance, contract_size, exit_level=
                 'type': 'BUY', 
                 'entry': current_row['close'], 
                 'entry_time': current_row['time'],
-                'entry_index': i
+                'entry_index': i,
+                'stop_loss': None
             }
-            print(f"[BUY] Entry at {current_row['time']}: Price={current_row['close']:.5f}, RSI={current_row['rsi']:.2f}")
+            if use_atr_stop and not pd.isna(current_row.get('atr', None)):
+                position['stop_loss'] = current_row['close'] - (atr_multiplier * current_row['atr'])
+                print(f"[BUY] Entry at {current_row['time']}: Price={current_row['close']:.5f}, RSI={current_row['rsi']:.2f}, SL={position['stop_loss']:.5f}")
+            else:
+                print(f"[BUY] Entry at {current_row['time']}: Price={current_row['close']:.5f}, RSI={current_row['rsi']:.2f}")
             
         elif current_row['signal'] == -1 and position is None:
             position = {
                 'type': 'SELL', 
                 'entry': current_row['close'], 
                 'entry_time': current_row['time'],
-                'entry_index': i
+                'entry_index': i,
+                'stop_loss': None
             }
-            print(f"[SELL] Entry at {current_row['time']}: Price={current_row['close']:.5f}, RSI={current_row['rsi']:.2f}")
+            if use_atr_stop and not pd.isna(current_row.get('atr', None)):
+                position['stop_loss'] = current_row['close'] + (atr_multiplier * current_row['atr'])
+                print(f"[SELL] Entry at {current_row['time']}: Price={current_row['close']:.5f}, RSI={current_row['rsi']:.2f}, SL={position['stop_loss']:.5f}")
+            else:
+                print(f"[SELL] Entry at {current_row['time']}: Price={current_row['close']:.5f}, RSI={current_row['rsi']:.2f}")
+        
+        # Check stop loss first
+        if position and position['stop_loss'] is not None:
+            if position['type'] == 'BUY' and current_row['low'] <= position['stop_loss']:
+                # Stop loss hit
+                exit_price = min(current_row['open'], position['stop_loss'])  # Account for gaps
+                pnl_pips = exit_price - position['entry']
+                pnl_dollars = pnl_pips * contract_size * lot_size
+                current_balance += pnl_dollars
+                duration = i - position['entry_index']
+                trade = {
+                    'type': position['type'],
+                    'entry_price': position['entry'],
+                    'exit_price': exit_price,
+                    'pnl_pips': pnl_pips,
+                    'pnl_dollars': pnl_dollars,
+                    'duration': duration,
+                    'entry_time': position['entry_time'],
+                    'exit_time': current_row['time'],
+                    'exit_reason': 'STOP_LOSS'
+                }
+                trades.append(trade)
+                equity_curve.append(current_balance)
+                stop_loss_hits += 1
+                print(f"[STOP LOSS HIT] at {current_row['time']}: Price={exit_price:.5f}, P&L=${pnl_dollars:.2f}")
+                position = None
+                continue
+            elif position['type'] == 'SELL' and current_row['high'] >= position['stop_loss']:
+                # Stop loss hit
+                exit_price = max(current_row['open'], position['stop_loss'])  # Account for gaps
+                pnl_pips = position['entry'] - exit_price
+                pnl_dollars = pnl_pips * contract_size * lot_size
+                current_balance += pnl_dollars
+                duration = i - position['entry_index']
+                trade = {
+                    'type': position['type'],
+                    'entry_price': position['entry'],
+                    'exit_price': exit_price,
+                    'pnl_pips': pnl_pips,
+                    'pnl_dollars': pnl_dollars,
+                    'duration': duration,
+                    'entry_time': position['entry_time'],
+                    'exit_time': current_row['time'],
+                    'exit_reason': 'STOP_LOSS'
+                }
+                trades.append(trade)
+                equity_curve.append(current_balance)
+                stop_loss_hits += 1
+                print(f"[STOP LOSS HIT] at {current_row['time']}: Price={exit_price:.5f}, P&L=${pnl_dollars:.2f}")
+                position = None
+                continue
         
         # Exit logic - RSI crosses back to 50
-        elif position and current_row['rsi'] > exit_level and position['type'] == 'BUY':
+        if position and current_row['rsi'] > exit_level and position['type'] == 'BUY':
             pnl_pips = current_row['close'] - position['entry']
             pnl_dollars = pnl_pips * contract_size * lot_size  # Convert to dollars
             current_balance += pnl_dollars
@@ -64,7 +143,8 @@ def backtest_strategy(df, lot_size, starting_balance, contract_size, exit_level=
                 'pnl_dollars': pnl_dollars,
                 'duration': duration,
                 'entry_time': position['entry_time'],
-                'exit_time': current_row['time']
+                'exit_time': current_row['time'],
+                'exit_reason': 'RSI_EXIT'
             }
             trades.append(trade)
             equity_curve.append(current_balance)
@@ -84,14 +164,15 @@ def backtest_strategy(df, lot_size, starting_balance, contract_size, exit_level=
                 'pnl_dollars': pnl_dollars,
                 'duration': duration,
                 'entry_time': position['entry_time'],
-                'exit_time': current_row['time']
+                'exit_time': current_row['time'],
+                'exit_reason': 'RSI_EXIT'
             }
             trades.append(trade)
             equity_curve.append(current_balance)
             print(f"[EXIT SELL] at {current_row['time']}: Price={current_row['close']:.5f}, RSI={current_row['rsi']:.2f}, P&L=${pnl_dollars:.2f}")
             position = None
     
-    return trades, position, equity_curve, current_balance
+    return trades, position, equity_curve, current_balance, stop_loss_hits
 
 def test_rsi_parameters(df, parameters_list, lot_size=0.01, starting_balance=10000, contract_size=100000):
     results = []
@@ -208,9 +289,14 @@ def main():
     # Calculate RSI
     df['rsi'] = calculate_rsi(df['close'], trading_params['rsi_period'])
     
+    # Calculate ATR
+    df['atr'] = calculate_atr(df, trading_params.get('atr_period', 14))
+    
     # Get trading parameters
     lot_size = trading_params['lot_size']
     starting_balance = trading_params['starting_balance']
+    use_atr_stop = trading_params.get('use_atr_stop', False)
+    atr_multiplier = trading_params.get('atr_multiplier', 2.0)
     
     # Generate signals with configured parameters
     df = generate_signals(
@@ -219,8 +305,8 @@ def main():
         rsi_overbought=trading_params['rsi_overbought']
     )
     
-    # Run main backtest
-    print("\n=== RUNNING RSI MEAN REVERSION BACKTEST ===")
+    # Run backtest WITHOUT ATR stop loss first
+    print("\n=== RUNNING RSI MEAN REVERSION BACKTEST (WITHOUT ATR STOP LOSS) ===")
     print(f"Instrument: {trading_params['instrument']}")
     print(f"Timeframe: {trading_params['timeframe']}")
     print(f"Data Period: {df['time'].iloc[0].strftime('%Y-%m-%d')} to {df['time'].iloc[-1].strftime('%Y-%m-%d')}")
@@ -230,45 +316,102 @@ def main():
     print(f"Starting Balance: ${starting_balance:,}")
     print("=" * 60)
     
-    trades, open_position, equity_curve, final_balance = backtest_strategy(
+    trades_no_sl, open_position_no_sl, equity_curve_no_sl, final_balance_no_sl, _ = backtest_strategy(
         df,
         lot_size,
         starting_balance,
         trading_params['contract_size'],
-        trading_params['rsi_exit_level']
+        trading_params['rsi_exit_level'],
+        use_atr_stop=False
     )
     
-    # Display main results
-    print("\n=== BACKTEST RESULTS ===")
-    print(f"Total trades completed: {len(trades)}")
+    # Run backtest WITH ATR stop loss
+    print("\n\n=== RUNNING RSI MEAN REVERSION BACKTEST (WITH ATR STOP LOSS) ===")
+    print(f"ATR Stop Loss: Enabled")
+    print(f"ATR Period: {trading_params.get('atr_period', 14)}")
+    print(f"ATR Multiplier: {atr_multiplier}")
+    print("=" * 60)
     
+    trades, open_position, equity_curve, final_balance, stop_loss_hits = backtest_strategy(
+        df,
+        lot_size,
+        starting_balance,
+        trading_params['contract_size'],
+        trading_params['rsi_exit_level'],
+        use_atr_stop=True,
+        atr_multiplier=atr_multiplier
+    )
+    
+    # Display comparison results
+    print("\n=== BACKTEST RESULTS COMPARISON ===")
+    print(f"{'Metric':<30} {'Without ATR SL':>20} {'With ATR SL':>20}")
+    print("-" * 70)
+    
+    # Process results for both strategies
+    if trades_no_sl:
+        total_return_no_sl = (final_balance_no_sl - starting_balance) / starting_balance * 100
+        winning_trades_no_sl = [t for t in trades_no_sl if t['pnl_dollars'] > 0]
+        losing_trades_no_sl = [t for t in trades_no_sl if t['pnl_dollars'] <= 0]
+        win_rate_no_sl = len(winning_trades_no_sl)/len(trades_no_sl)*100 if trades_no_sl else 0
+        avg_win_no_sl = sum([t['pnl_dollars'] for t in winning_trades_no_sl]) / len(winning_trades_no_sl) if winning_trades_no_sl else 0
+        avg_loss_no_sl = sum([t['pnl_dollars'] for t in losing_trades_no_sl]) / len(losing_trades_no_sl) if losing_trades_no_sl else 0
+    else:
+        total_return_no_sl = 0
+        win_rate_no_sl = 0
+        avg_win_no_sl = 0
+        avg_loss_no_sl = 0
+        
     if trades:
         total_return = (final_balance - starting_balance) / starting_balance * 100
         winning_trades = [t for t in trades if t['pnl_dollars'] > 0]
         losing_trades = [t for t in trades if t['pnl_dollars'] <= 0]
+        win_rate = len(winning_trades)/len(trades)*100 if trades else 0
+        avg_win = sum([t['pnl_dollars'] for t in winning_trades]) / len(winning_trades) if winning_trades else 0
+        avg_loss = sum([t['pnl_dollars'] for t in losing_trades]) / len(losing_trades) if losing_trades else 0
         
-        print(f"Final Balance: ${final_balance:,.2f}")
-        print(f"Total Return: {total_return:.2f}%")
-        print(f"Total P&L: ${final_balance - starting_balance:,.2f}")
-        print(f"Winning trades: {len(winning_trades)} ({len(winning_trades)/len(trades)*100:.1f}%)")
-        print(f"Losing trades: {len(losing_trades)} ({len(losing_trades)/len(trades)*100:.1f}%)")
-        
-        if winning_trades:
-            avg_win = sum([t['pnl_dollars'] for t in winning_trades]) / len(winning_trades)
-            print(f"Average win: ${avg_win:.2f}")
-        
-        if losing_trades:
-            avg_loss = sum([t['pnl_dollars'] for t in losing_trades]) / len(losing_trades)
-            print(f"Average loss: ${avg_loss:.2f}")
+        # Count exit reasons
+        rsi_exits = len([t for t in trades if t.get('exit_reason') == 'RSI_EXIT'])
+        sl_exits = len([t for t in trades if t.get('exit_reason') == 'STOP_LOSS'])
     else:
-        print("No trades were executed.")
+        total_return = 0
+        win_rate = 0
+        avg_win = 0
+        avg_loss = 0
+        rsi_exits = 0
+        sl_exits = 0
+    
+    print(f"{'Total trades':<30} {len(trades_no_sl):>20} {len(trades):>20}")
+    print(f"{'Final Balance':<30} ${final_balance_no_sl:>19,.2f} ${final_balance:>19,.2f}")
+    print(f"{'Total Return':<30} {total_return_no_sl:>19.2f}% {total_return:>19.2f}%")
+    print(f"{'Total P&L':<30} ${final_balance_no_sl - starting_balance:>19,.2f} ${final_balance - starting_balance:>19,.2f}")
+    print(f"{'Win Rate':<30} {win_rate_no_sl:>19.1f}% {win_rate:>19.1f}%")
+    print(f"{'Average Win':<30} ${avg_win_no_sl:>19.2f} ${avg_win:>19.2f}")
+    print(f"{'Average Loss':<30} ${avg_loss_no_sl:>19.2f} ${avg_loss:>19.2f}")
+    
+    if trades:
+        print(f"\n{'Exit Type Analysis (With ATR SL)':<30}")
+        print(f"{'RSI Exits':<30} {rsi_exits:>20} ({rsi_exits/len(trades)*100:.1f}%)")
+        print(f"{'Stop Loss Exits':<30} {sl_exits:>20} ({sl_exits/len(trades)*100:.1f}%)")
     
     if open_position:
-        print(f"\nOpen position: {open_position['type']} at {open_position['entry']:.5f}")
+        print(f"\nOpen position (With ATR SL): {open_position['type']} at {open_position['entry']:.5f}")
+    if open_position_no_sl:
+        print(f"Open position (Without ATR SL): {open_position_no_sl['type']} at {open_position_no_sl['entry']:.5f}")
     
-    # Plot equity curve
-    if trades:
-        plot_equity_curve(equity_curve, "RSI Mean Reversion Strategy - Equity Curve")
+    # Plot equity curves comparison
+    if trades or trades_no_sl:
+        plt.figure(figsize=(12, 6))
+        if trades_no_sl:
+            plt.plot(equity_curve_no_sl, linewidth=2, label='Without ATR Stop Loss', alpha=0.7)
+        if trades:
+            plt.plot(equity_curve, linewidth=2, label='With ATR Stop Loss', alpha=0.7)
+        plt.title("RSI Mean Reversion Strategy - Equity Curve Comparison", fontsize=14, fontweight='bold')
+        plt.xlabel('Trades')
+        plt.ylabel('Account Balance ($)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
     
     # Test different RSI parameters
     print("\n=== TESTING DIFFERENT RSI PARAMETERS ===")
