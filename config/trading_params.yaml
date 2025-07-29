@@ -1,0 +1,11 @@
+trading_params:
+  instrument: 'EURUSDx'
+  timeframe: 'M1'
+  lot_size: 0.01
+  contract_size: 100000
+  starting_balance: 10000
+  lookback_bars: 100000
+  rsi_period: 14
+  rsi_oversold: 35
+  rsi_overbought: 65
+  rsi_exit_level: 50
