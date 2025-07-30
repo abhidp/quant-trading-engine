@@ -1,10 +1,18 @@
+import logging
+import os
+import time
+from datetime import datetime
+
 import MetaTrader5 as mt5
 import pandas as pd
 import yaml
-import os
-import time
-import logging
-from datetime import datetime
+
+# Import modular components
+from core.indicators import ATRCalculator, RSICalculator
+from core.risk_manager import RiskManager
+from core.signal_generator import RSISignalGenerator
+from data.mt5_connector import MT5Connector
+from utils.validation import DataValidator, ErrorHandler
 
 # Setup logging
 logging.basicConfig(
@@ -17,31 +25,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def calculate_rsi(prices, period=14):
-    delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    # Handle case where loss is 0 (all gains)
-    loss = loss.replace(0, 0.0001)  # Small epsilon to avoid division by zero
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_atr(df, period=14):
-    """Calculate Average True Range (ATR)"""
-    high = df['high']
-    low = df['low']
-    close = df['close']
-    
-    # Calculate True Range
-    hl = high - low
-    hc = abs(high - close.shift())
-    lc = abs(low - close.shift())
-    
-    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-    
-    # Calculate ATR as exponential moving average of TR
-    atr = tr.ewm(span=period, adjust=False).mean()
-    return atr
+# Initialize modular components
+rsi_calculator = RSICalculator()
+atr_calculator = ATRCalculator()
+risk_manager = RiskManager()
+signal_generator = RSISignalGenerator()
+data_validator = DataValidator()
+error_handler = ErrorHandler()
+mt5_connector = MT5Connector()
 
 def load_credentials():
     config_path = os.path.join('config', 'credentials.yaml')
@@ -52,7 +43,7 @@ def load_credentials():
         logger.error(f"Configuration file not found at {config_path}")
         raise
     except yaml.YAMLError as e:
-        logger.error(f"Error parsing YAML file: {e}")
+        logger.error("Error parsing YAML file: %s", e)
         raise
 
 def load_params():
@@ -68,26 +59,8 @@ def load_params():
         raise
 
 def initialize_mt5():
-    # Load configuration
-    mt5_config = load_credentials()['mt5']
-    
-    # Connect to specific MT5 terminal
-    if not mt5.initialize(path=mt5_config['terminal_path']):
-        logger.error(f"MT5 initialize() failed, error code = {mt5.last_error()}")
-        return False
-    
-    # Login to account
-    if not mt5.login(
-        login=int(mt5_config['username']),
-        password=mt5_config['password'],
-        server=mt5_config['server']
-    ):
-        logger.error(f"MT5 login() failed, error code = {mt5.last_error()}")
-        mt5.shutdown()
-        return False
-    
-    logger.info(f"MT5 connection established to {mt5_config['server']} (Account: {mt5_config['username']})")
-    return True
+    """Initialize MT5 connection using modular connector"""
+    return mt5_connector.connect()
 
 def get_current_positions(symbol):
     """Get current open positions for the symbol"""
@@ -101,7 +74,7 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
     # Get symbol info to determine correct filling mode
     symbol_info = mt5.symbol_info(symbol)
     if symbol_info is None:
-        logger.error(f"Symbol {symbol} not found")
+        logger.error("Symbol %s not found", symbol)
         return None
     
     # Determine the best filling mode
@@ -264,6 +237,11 @@ def live_trading_loop():
     atr_multiplier = params.get('atr_multiplier', 2.0)
     use_atr_stop = params.get('use_atr_stop', True)
     
+    # Initialize modular components with parameters
+    rsi_calculator = RSICalculator(rsi_period)
+    atr_calculator = ATRCalculator(atr_period)
+    signal_generator = RSISignalGenerator(rsi_oversold, rsi_overbought, rsi_exit_level)
+    
     logger.info(f"Trading parameters loaded:")
     logger.info(f"Symbol: {symbol}, Timeframe: {params['timeframe']}")
     logger.info(f"RSI: {rsi_period} period, Entry: {rsi_oversold}/{rsi_overbought}, Exit: {rsi_exit_level}")
@@ -288,63 +266,73 @@ def live_trading_loop():
             if last_bar_time != current_time:
                 last_bar_time = current_time
                 
-                # Calculate RSI on recent data
+                # Calculate indicators using modular components
                 df = pd.DataFrame(bars)
-                df['rsi'] = calculate_rsi(df['close'], rsi_period)
+                
+                # Validate data
+                if not data_validator.validate_ohlc_data(df):
+                    logger.warning("Data validation failed, skipping this iteration")
+                    continue
+                
+                df['rsi'] = rsi_calculator.calculate(df['close'], rsi_period)
                 current_rsi = df['rsi'].iloc[-1]
                 current_price = current_bar['close']
                 
                 # Calculate ATR if stop loss is enabled
                 if use_atr_stop:
-                    df['atr'] = calculate_atr(df, atr_period)
+                    df['atr'] = atr_calculator.calculate(df, atr_period)
                     current_atr = df['atr'].iloc[-1]
                 
                 bar_time = datetime.fromtimestamp(current_time)
-                logger.info(f"New bar [{bar_time}] - Price: {current_price:.5f}, RSI: {current_rsi:.2f}")
+                # logger.info(f"New bar [{bar_time}] - Price: {current_price:.5f}, RSI: {current_rsi:.2f}")
                 
                 # Get current positions
                 positions = get_current_positions(symbol)
                 has_buy_position = any(pos.type == mt5.ORDER_TYPE_BUY for pos in positions)
                 has_sell_position = any(pos.type == mt5.ORDER_TYPE_SELL for pos in positions)
                 
-                # Entry signals
-                if current_rsi < rsi_oversold and not has_buy_position and not has_sell_position:
-                    logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {rsi_oversold}")
+                # Entry signals using modular signal generator
+                if signal_generator.should_enter_buy(current_rsi) and not has_buy_position and not has_sell_position:
+                    logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
                     
                     # Calculate stop loss if enabled
                     stop_loss = None
                     if use_atr_stop:
-                        stop_loss = current_price - (atr_multiplier * current_atr)
+                        stop_loss = risk_manager.calculate_atr_stop_loss(
+                            current_price, current_atr, atr_multiplier, 'buy'
+                        )
                         logger.info(f"ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
                     
                     result = place_buy_order(symbol, lot_size, stop_loss)
                     if result:
                         logger.info(f"[SUCCESS] BUY position opened at {current_price:.5f}")
                 
-                elif current_rsi > rsi_overbought and not has_buy_position and not has_sell_position:
-                    logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {rsi_overbought}")
+                elif signal_generator.should_enter_sell(current_rsi) and not has_buy_position and not has_sell_position:
+                    logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
                     
                     # Calculate stop loss if enabled
                     stop_loss = None
                     if use_atr_stop:
-                        stop_loss = current_price + (atr_multiplier * current_atr)
+                        stop_loss = risk_manager.calculate_atr_stop_loss(
+                            current_price, current_atr, atr_multiplier, 'sell'
+                        )
                         logger.info(f"ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
                     
                     result = place_sell_order(symbol, lot_size, stop_loss)
                     if result:
                         logger.info(f"[SUCCESS] SELL position opened at {current_price:.5f}")
                 
-                # Exit signals
-                if has_buy_position and current_rsi > rsi_exit_level:
-                    logger.info(f"EXIT BUY SIGNAL: RSI {current_rsi:.2f} > {rsi_exit_level}")
+                # Exit signals using modular signal generator
+                if has_buy_position and signal_generator.should_exit_buy(current_rsi):
+                    logger.info(f"EXIT BUY SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_exit_level}")
                     for pos in positions:
                         if pos.type == mt5.ORDER_TYPE_BUY:
                             result = close_position(pos)
                             if result:
                                 logger.info(f"[SUCCESS] BUY position closed at {current_price:.5f}")
                 
-                elif has_sell_position and current_rsi < rsi_exit_level:
-                    logger.info(f"EXIT SELL SIGNAL: RSI {current_rsi:.2f} < {rsi_exit_level}")
+                elif has_sell_position and signal_generator.should_exit_sell(current_rsi):
+                    logger.info(f"EXIT SELL SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_exit_level}")
                     for pos in positions:
                         if pos.type == mt5.ORDER_TYPE_SELL:
                             result = close_position(pos)
@@ -378,7 +366,7 @@ def main():
         live_trading_loop()
     finally:
         # Cleanup
-        mt5.shutdown()
+        mt5_connector.disconnect()
         logger.info("MT5 connection closed")
 
 if __name__ == "__main__":

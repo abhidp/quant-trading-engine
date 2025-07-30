@@ -1,5 +1,5 @@
 trading_params:
-  instrument: 'GBPUSDx'
+  instrument: 'EURUSDx'
   timeframe: 'M1'
   lot_size: 0.50
   contract_size: 100000
@@ -14,10 +14,10 @@ trading_params:
   cache_dir: 'data/cache'
   rsi_period: 14
   rsi_oversold: 35
-  rsi_overbought: 65
+  rsi_overbought: 70
   rsi_exit_level: 50
 
   # ATR Stop Loss parameters
   use_atr_stop: true
   atr_period: 14
-  atr_multiplier: 2.0
+  atr_multiplier: 1.5
