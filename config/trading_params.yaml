@@ -1,12 +1,12 @@
 trading_params:
-  instrument: 'EURUSDx'
+  instrument: 'GBPUSDx'
   timeframe: 'M1'
   lot_size: 0.50
   contract_size: 100000
   starting_balance: 10000
 
   # Date range for historical data
-  start_date: '2024-01-01'
+  start_date: '2025-01-02'
   end_date: '2025-07-29'
 
   # Cache settings
@@ -14,10 +14,23 @@ trading_params:
   cache_dir: 'data/cache'
   rsi_period: 14
   rsi_oversold: 35
-  rsi_overbought: 70
+  rsi_overbought: 65
   rsi_exit_level: 50
 
-  # ATR Stop Loss parameters
-  use_atr_stop: true
+  # ATR Stop Loss parameters (Legacy - for reference)
+  use_atr_stop: false # Disabled in favor of trailing stops
   atr_period: 14
-  atr_multiplier: 1.5
+  atr_multiplier: 1
+
+  # ATR Trailing Stop System
+  trailing_stops:
+    enabled: true
+    strategy: 'C' # Options: A (Pure), B (Time-based), C (Aggressive)
+    allow_runtime_changes: true
+    config_check_interval: 60 # Check for config changes every N seconds
+
+
+    # Strategy Descriptions:
+    # A: Breakeven@1.5 ATR, Trail@1.0 ATR, Hard Stop@2.0 ATR (Conservative)
+    # B: Breakeven@2.0 ATR, Trail@1.5 ATR, Hard Stop@2.5 ATR (Balanced)
+    # C: Breakeven@1.0 ATR, Trail@0.75 ATR, Hard Stop@1.5 ATR (Aggressive)
