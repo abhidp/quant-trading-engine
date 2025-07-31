@@ -11,6 +11,7 @@ import yaml
 from core.indicators import ATRCalculator, RSICalculator
 from core.risk_manager import RiskManager
 from core.signal_generator import RSISignalGenerator
+from core.trailing_stop_manager import TrailingStopManager, TrailingStopStrategy
 from data.mt5_connector import MT5Connector
 from utils.validation import DataValidator, ErrorHandler
 
@@ -33,6 +34,12 @@ signal_generator = RSISignalGenerator()
 data_validator = DataValidator()
 error_handler = ErrorHandler()
 mt5_connector = MT5Connector()
+
+# Trailing stop system components (initialized in main)
+trailing_stop_manager = None
+current_trailing_strategy = None
+last_config_check = 0
+position_tracking = {}  # Dict to track positions with trailing stops
 
 def load_credentials():
     config_path = os.path.join('config', 'credentials.yaml')
@@ -57,6 +64,59 @@ def load_params():
     except yaml.YAMLError as e:
         logger.error(f"Error parsing YAML file: {e}")
         raise
+
+def initialize_trailing_stops(params):
+    """Initialize or update trailing stop configuration"""
+    global trailing_stop_manager, current_trailing_strategy
+    
+    trailing_config = params.get('trailing_stops', {})
+    
+    if not trailing_config.get('enabled', False):
+        logger.info("Trailing stops disabled in configuration")
+        trailing_stop_manager = None
+        current_trailing_strategy = None
+        return False
+    
+    strategy_option = trailing_config.get('strategy', 'B').upper()
+    
+    # Check if strategy changed
+    if current_trailing_strategy != strategy_option:
+        try:
+            trailing_stop_manager = TrailingStopStrategy.get_strategy(strategy_option)
+            current_trailing_strategy = strategy_option
+            logger.info(f"Trailing stop strategy initialized: {strategy_option}")
+            logger.info(f"Strategy parameters: Breakeven@{trailing_stop_manager.breakeven_trigger} ATR, "
+                       f"Trail@{trailing_stop_manager.trail_distance} ATR, "
+                       f"Hard Stop@{trailing_stop_manager.hard_stop_distance} ATR")
+            return True
+        except ValueError as e:
+            logger.error(f"Invalid trailing stop strategy: {e}")
+            return False
+    
+    return True
+
+def check_config_updates(params):
+    """Check for configuration updates and apply if needed"""
+    global last_config_check
+    
+    current_time = time.time()
+    trailing_config = params.get('trailing_stops', {})
+    check_interval = trailing_config.get('config_check_interval', 60)
+    
+    if current_time - last_config_check >= check_interval:
+        last_config_check = current_time
+        
+        if trailing_config.get('allow_runtime_changes', False):
+            # Reload configuration
+            try:
+                new_params = load_params()['trading_params']
+                if initialize_trailing_stops(new_params):
+                    # logger.info("Configuration reloaded successfully")
+                    return new_params
+            except Exception as e:
+                logger.error(f"Failed to reload configuration: {e}")
+    
+    return params
 
 def initialize_mt5():
     """Initialize MT5 connection using modular connector"""
@@ -109,6 +169,19 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
         return None
     
     logger.info(f"BUY order successful: {result.order}, volume={volume}, price={result.price}")
+    
+    # Initialize trailing stop tracking if enabled
+    if trailing_stop_manager is not None and result.order:
+        # Get position ticket (deal ticket is different from position ticket)
+        time.sleep(0.1)  # Small delay to ensure position is recorded
+        positions = mt5.positions_get(symbol=symbol)
+        if positions:
+            # Find the position we just opened
+            for pos in positions:
+                if pos.comment == 'RSI Strategy BUY' and abs(pos.price_open - result.price) < 0.00001:
+                    initialize_position_tracking(pos, result.price)
+                    break
+    
     return result
 
 def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
@@ -151,12 +224,141 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
         return None
     
     logger.info(f"SELL order successful: {result.order}, volume={volume}, price={result.price}")
+    
+    # Initialize trailing stop tracking if enabled
+    if trailing_stop_manager is not None and result.order:
+        # Get position ticket (deal ticket is different from position ticket)
+        time.sleep(0.1)  # Small delay to ensure position is recorded
+        positions = mt5.positions_get(symbol=symbol)
+        if positions:
+            # Find the position we just opened
+            for pos in positions:
+                if pos.comment == 'RSI Strategy SELL' and abs(pos.price_open - result.price) < 0.00001:
+                    initialize_position_tracking(pos, result.price)
+                    break
+    
     return result
+
+def initialize_position_tracking(mt5_position, entry_price):
+    """Initialize trailing stop tracking for a new position"""
+    global position_tracking, trailing_stop_manager
+    
+    if trailing_stop_manager is None:
+        return
+    
+    # Create position tracking record
+    position_data = {
+        'type': 'BUY' if mt5_position.type == mt5.ORDER_TYPE_BUY else 'SELL',
+        'entry': entry_price,
+        'entry_time': datetime.fromtimestamp(mt5_position.time),
+        'symbol': mt5_position.symbol,
+        'volume': mt5_position.volume
+    }
+    
+    # Get current ATR for initialization
+    try:
+        # Get recent bars for ATR calculation
+        symbol = mt5_position.symbol
+        timeframe = mt5.TIMEFRAME_M1  # Use current timeframe from config
+        bars = mt5.copy_rates_from_pos(symbol, timeframe, 0, 50)
+        
+        if bars is not None:
+            df = pd.DataFrame(bars)
+            current_atr = atr_calculator.calculate(df, 14).iloc[-1]  # Use ATR period from config
+            
+            # Initialize tracking with trailing stop manager
+            position_data = trailing_stop_manager.initialize_position_tracking(
+                position_data, entry_price, current_atr
+            )
+            
+            # Store in tracking dictionary
+            position_tracking[mt5_position.ticket] = position_data
+            
+            logger.info(f"Position {mt5_position.ticket} initialized for trailing stop tracking")
+            logger.info(f"Entry: {entry_price:.5f}, Initial Stop: {position_data['initial_stop']:.5f}")
+            
+        else:
+            logger.error(f"Could not get market data for ATR calculation")
+            
+    except Exception as e:
+        logger.error(f"Error initializing position tracking: {e}")
+
+def update_position_tracking(position_ticket, current_price, current_atr):
+    """Update trailing stop tracking for a position"""
+    global position_tracking, trailing_stop_manager
+    
+    if trailing_stop_manager is None:
+        return None
+    
+    if position_ticket not in position_tracking:
+        logger.warning(f"Position {position_ticket} not found in tracking")
+        return None
+    
+    tracked_position = position_tracking[position_ticket]
+    
+    # Update trailing stop
+    new_stop, reason = trailing_stop_manager.update_stop_loss(
+        tracked_position, current_price, current_atr
+    )
+    
+    if reason != "UNCHANGED":
+        tracked_position['stop_loss'] = new_stop
+        logger.info(f"Position {position_ticket}: {reason} - New stop: {new_stop:.5f}")
+        
+        # Update MT5 position stop loss
+        return update_mt5_stop_loss(position_ticket, new_stop)
+    
+    return tracked_position.get('stop_loss')
+
+def update_mt5_stop_loss(position_ticket, new_stop_loss):
+    """Update stop loss in MT5 for existing position"""
+    try:
+        # Get current position info
+        positions = mt5.positions_get(ticket=position_ticket)
+        if not positions:
+            logger.error(f"Position {position_ticket} not found in MT5")
+            return None
+            
+        position = positions[0]
+        
+        # Prepare modification request
+        request = {
+            'action': mt5.TRADE_ACTION_SLTP,
+            'position': position_ticket,
+            'sl': new_stop_loss,
+            'tp': position.tp,  # Keep existing take profit
+        }
+        
+        result = mt5.order_send(request)
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            logger.info(f"Stop loss updated for position {position_ticket}: {new_stop_loss:.5f}")
+            return new_stop_loss
+        else:
+            logger.error(f"Failed to update stop loss for position {position_ticket}: "
+                        f"retcode={result.retcode}, comment={result.comment}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error updating stop loss for position {position_ticket}: {e}")
+        return None
 
 def close_position(position):
     """Close an open position"""
     symbol = position.symbol
     volume = position.volume
+    position_ticket = position.ticket
+    
+    # Remove from tracking if present
+    if position_ticket in position_tracking:
+        tracked_pos = position_tracking.pop(position_ticket)
+        logger.info(f"Position {position_ticket} removed from trailing stop tracking")
+        
+        # Log final statistics
+        stats = trailing_stop_manager.get_stop_statistics(tracked_pos) if trailing_stop_manager else {}
+        if stats.get('total_adjustments', 0) > 0:
+            logger.info(f"Position {position_ticket} final stats: "
+                       f"{stats['total_adjustments']} adjustments, "
+                       f"Breakeven triggered: {stats.get('breakeven_triggered', False)}")
     
     # Get symbol info to determine correct filling mode
     symbol_info = mt5.symbol_info(symbol)
@@ -220,11 +422,15 @@ def close_position(position):
     return result
 
 def live_trading_loop():
-    """Main live trading loop"""
+    """Main live trading loop with ATR Trailing Stop System"""
     logger.info("Starting live trading loop...")
     
     # Load trading parameters
     params = load_params()['trading_params']
+    
+    # Initialize trailing stop system
+    if not initialize_trailing_stops(params):
+        logger.warning("Trailing stops initialization failed, using legacy ATR stops")
     
     symbol = params['instrument']
     timeframe = getattr(mt5, f'TIMEFRAME_{params["timeframe"]}')
@@ -246,7 +452,14 @@ def live_trading_loop():
     logger.info(f"Symbol: {symbol}, Timeframe: {params['timeframe']}")
     logger.info(f"RSI: {rsi_period} period, Entry: {rsi_oversold}/{rsi_overbought}, Exit: {rsi_exit_level}")
     logger.info(f"Position size: {lot_size} lots")
-    logger.info(f"ATR Stop Loss: {'Enabled' if use_atr_stop else 'Disabled'}, Period: {atr_period}, Multiplier: {atr_multiplier}")
+    
+    if trailing_stop_manager:
+        logger.info(f"ATR Trailing Stops: ENABLED - Strategy {current_trailing_strategy}")
+        logger.info(f"   Breakeven: {trailing_stop_manager.breakeven_trigger} ATR")
+        logger.info(f"   Trail Distance: {trailing_stop_manager.trail_distance} ATR") 
+        logger.info(f"   Hard Stop: {trailing_stop_manager.hard_stop_distance} ATR")
+    else:
+        logger.info(f"ATR Stop Loss: {'Enabled' if use_atr_stop else 'Disabled'}, Period: {atr_period}, Multiplier: {atr_multiplier}")
     
     last_bar_time = None
     
@@ -278,30 +491,43 @@ def live_trading_loop():
                 current_rsi = df['rsi'].iloc[-1]
                 current_price = current_bar['close']
                 
-                # Calculate ATR if stop loss is enabled
-                if use_atr_stop:
-                    df['atr'] = atr_calculator.calculate(df, atr_period)
-                    current_atr = df['atr'].iloc[-1]
+                # Calculate ATR (always needed for trailing stops or legacy stops)
+                df['atr'] = atr_calculator.calculate(df, atr_period)
+                current_atr = df['atr'].iloc[-1]
                 
                 bar_time = datetime.fromtimestamp(current_time)
                 # logger.info(f"New bar [{bar_time}] - Price: {current_price:.5f}, RSI: {current_rsi:.2f}")
+                
+                # Check for configuration updates (hot-reload)
+                params = check_config_updates(params)
                 
                 # Get current positions
                 positions = get_current_positions(symbol)
                 has_buy_position = any(pos.type == mt5.ORDER_TYPE_BUY for pos in positions)
                 has_sell_position = any(pos.type == mt5.ORDER_TYPE_SELL for pos in positions)
                 
+                # Update trailing stops for existing positions
+                if trailing_stop_manager and position_tracking:
+                    for pos in positions:
+                        if pos.ticket in position_tracking:
+                            update_position_tracking(pos.ticket, current_price, current_atr)
+                
                 # Entry signals using modular signal generator
                 if signal_generator.should_enter_buy(current_rsi) and not has_buy_position and not has_sell_position:
                     logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
                     
-                    # Calculate stop loss if enabled
+                    # Calculate initial stop loss
                     stop_loss = None
-                    if use_atr_stop:
+                    if trailing_stop_manager:
+                        # Use trailing stop system - calculate initial hard stop
+                        stop_loss = current_price - (trailing_stop_manager.hard_stop_distance * current_atr)
+                        logger.info(f"Initial Hard Stop: {stop_loss:.5f} (Trailing stops will manage from here)")
+                    elif use_atr_stop:
+                        # Fallback to legacy ATR stop
                         stop_loss = risk_manager.calculate_atr_stop_loss(
                             current_price, current_atr, atr_multiplier, 'buy'
                         )
-                        logger.info(f"ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
+                        logger.info(f"Legacy ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
                     
                     result = place_buy_order(symbol, lot_size, stop_loss)
                     if result:
@@ -310,13 +536,18 @@ def live_trading_loop():
                 elif signal_generator.should_enter_sell(current_rsi) and not has_buy_position and not has_sell_position:
                     logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
                     
-                    # Calculate stop loss if enabled
+                    # Calculate initial stop loss
                     stop_loss = None
-                    if use_atr_stop:
+                    if trailing_stop_manager:
+                        # Use trailing stop system - calculate initial hard stop
+                        stop_loss = current_price + (trailing_stop_manager.hard_stop_distance * current_atr)
+                        logger.info(f"Initial Hard Stop: {stop_loss:.5f} (Trailing stops will manage from here)")
+                    elif use_atr_stop:
+                        # Fallback to legacy ATR stop
                         stop_loss = risk_manager.calculate_atr_stop_loss(
                             current_price, current_atr, atr_multiplier, 'sell'
                         )
-                        logger.info(f"ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
+                        logger.info(f"Legacy ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
                     
                     result = place_sell_order(symbol, lot_size, stop_loss)
                     if result:
@@ -353,8 +584,22 @@ def live_trading_loop():
 
 def main():
     """Main function"""
-    logger.info("=== RSI LIVE TRADING BOT STARTING ===")
+    logger.info("=== RSI LIVE TRADING BOT WITH ATR TRAILING STOPS ===")
     logger.info("WARNING: MAKE SURE YOU'RE USING A DEMO ACCOUNT!")
+    
+    # Load initial configuration
+    try:
+        params = load_params()['trading_params']
+        trailing_config = params.get('trailing_stops', {})
+        if trailing_config.get('enabled', False):
+            strategy = trailing_config.get('strategy', 'B')
+            logger.info(f"ATR Trailing Stop System: ENABLED")
+            logger.info(f"Strategy: {strategy}")
+            logger.info(f"Runtime Strategy Changes: {'ENABLED' if trailing_config.get('allow_runtime_changes', False) else 'DISABLED'}")
+        else:
+            logger.info("🔒 Using Legacy ATR Stop Loss System")
+    except Exception as e:
+        logger.error(f"Failed to load initial configuration: {e}")
     
     # Initialize MT5 connection
     if not initialize_mt5():

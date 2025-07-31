@@ -10,7 +10,8 @@
       "Bash(mkdir:*)",
       "Bash(rm:*)",
       "Bash(ls:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(./venv/Scripts/activate)"
     ],
     "deny": []
   }
