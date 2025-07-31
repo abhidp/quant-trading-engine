@@ -199,16 +199,17 @@ class TrailingStopStrategy:
     @staticmethod
     def option_c_aggressive():
         """Option C: Aggressive trailing (tighter stops for quick profits)"""
-        # return TrailingStopManager(
-        #     breakeven_trigger=1.0,  # Earlier breakeven trigger
-        #     trail_distance=0.75,    # Tighter trailing
-        #     hard_stop_distance=1.5
-        # )
         return TrailingStopManager(
-            breakeven_trigger=0.5,  # Earlier breakeven trigger
-            trail_distance=0.25,    # Tighter trailing
-            hard_stop_distance=0.5
+            breakeven_trigger=1.0,  # Earlier breakeven trigger
+            trail_distance=0.75,    # Tighter trailing
+            hard_stop_distance=1.5
         )
+    
+        # return TrailingStopManager(  # for quick testing
+        #     breakeven_trigger=0.5,   # Earlier breakeven trigger
+        #     trail_distance=0.25,     # Tighter trailing
+        #     hard_stop_distance=0.5
+        # )
     
     @staticmethod
     def get_strategy(option: str) -> TrailingStopManager:
