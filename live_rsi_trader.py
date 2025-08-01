@@ -10,7 +10,7 @@ import yaml
 # Import modular components
 from core.indicators import ATRCalculator, RSICalculator
 from core.risk_manager import RiskManager
-from core.signal_generator import RSISignalGenerator
+from core.signal_generator import RSISignalGenerator, MinimalFilterRSIEntry
 from core.trailing_stop_manager import TrailingStopManager, TrailingStopStrategy
 from data.mt5_connector import MT5Connector
 from utils.validation import DataValidator, ErrorHandler
@@ -443,10 +443,24 @@ def live_trading_loop():
     atr_multiplier = params.get('atr_multiplier', 2.0)
     use_atr_stop = params.get('use_atr_stop', True)
     
+    # RSI Momentum filtering parameters
+    rsi_momentum_threshold = params.get('rsi_momentum_threshold', 2.0)
+    use_momentum_filter = params.get('use_momentum_filter', True)
+    
     # Initialize modular components with parameters
     rsi_calculator = RSICalculator(rsi_period)
     atr_calculator = ATRCalculator(atr_period)
-    signal_generator = RSISignalGenerator(rsi_oversold, rsi_overbought, rsi_exit_level)
+    
+    # Choose signal generator based on momentum filter setting
+    if use_momentum_filter:
+        signal_generator = MinimalFilterRSIEntry(
+            rsi_oversold, rsi_overbought, rsi_exit_level, 
+            rsi_momentum_threshold, use_momentum_filter
+        )
+        logger.info(f"Using MinimalFilterRSIEntry with momentum threshold: {rsi_momentum_threshold}")
+    else:
+        signal_generator = RSISignalGenerator(rsi_oversold, rsi_overbought, rsi_exit_level)
+        logger.info(f"Using standard RSISignalGenerator (no momentum filter)")
     
     logger.info(f"Trading parameters loaded:")
     logger.info(f"Symbol: {symbol}, Timeframe: {params['timeframe']}")
@@ -462,6 +476,7 @@ def live_trading_loop():
         logger.info(f"ATR Stop Loss: {'Enabled' if use_atr_stop else 'Disabled'}, Period: {atr_period}, Multiplier: {atr_multiplier}")
     
     last_bar_time = None
+    previous_rsi = None  # Store previous RSI for momentum calculation
     
     while True:
         try:
@@ -491,6 +506,12 @@ def live_trading_loop():
                 current_rsi = df['rsi'].iloc[-1]
                 current_price = current_bar['close']
                 
+                # Update previous RSI for momentum calculation
+                if len(df) >= 2:
+                    previous_rsi_calc = df['rsi'].iloc[-2]
+                else:
+                    previous_rsi_calc = previous_rsi
+                
                 # Calculate ATR (always needed for trailing stops or legacy stops)
                 df['atr'] = atr_calculator.calculate(df, atr_period)
                 current_atr = df['atr'].iloc[-1]
@@ -513,8 +534,38 @@ def live_trading_loop():
                             update_position_tracking(pos.ticket, current_price, current_atr)
                 
                 # Entry signals using modular signal generator
-                if signal_generator.should_enter_buy(current_rsi) and not has_buy_position and not has_sell_position:
-                    logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
+                should_buy = False
+                should_sell = False
+                
+                if isinstance(signal_generator, MinimalFilterRSIEntry):
+                    # Use momentum-aware entry signals
+                    should_buy = signal_generator.should_enter_buy(current_rsi, previous_rsi_calc)
+                    should_sell = signal_generator.should_enter_sell(current_rsi, previous_rsi_calc)
+                    
+                    if should_buy:
+                        if use_momentum_filter and previous_rsi_calc is not None:
+                            rsi_change = current_rsi - previous_rsi_calc
+                            logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} (was {previous_rsi_calc:.2f}, +{rsi_change:.2f} momentum)")
+                        else:
+                            logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
+                    
+                    if should_sell:
+                        if use_momentum_filter and previous_rsi_calc is not None:
+                            rsi_change = current_rsi - previous_rsi_calc
+                            logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} (was {previous_rsi_calc:.2f}, {rsi_change:.2f} momentum)")
+                        else:
+                            logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
+                else:
+                    # Use standard RSI signal generator
+                    should_buy = signal_generator.should_enter_buy(current_rsi)
+                    should_sell = signal_generator.should_enter_sell(current_rsi)
+                    
+                    if should_buy:
+                        logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
+                    if should_sell:
+                        logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
+                
+                if should_buy and not has_buy_position and not has_sell_position:
                     
                     # Calculate initial stop loss
                     stop_loss = None
@@ -533,8 +584,7 @@ def live_trading_loop():
                     if result:
                         logger.info(f"[SUCCESS] BUY position opened at {current_price:.5f}")
                 
-                elif signal_generator.should_enter_sell(current_rsi) and not has_buy_position and not has_sell_position:
-                    logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
+                elif should_sell and not has_buy_position and not has_sell_position:
                     
                     # Calculate initial stop loss
                     stop_loss = None
@@ -569,6 +619,9 @@ def live_trading_loop():
                             result = close_position(pos)
                             if result:
                                 logger.info(f"[SUCCESS] SELL position closed at {current_price:.5f}")
+                
+                # Update previous RSI for next iteration
+                previous_rsi = current_rsi
             
             # Sleep for 5 seconds before next check
             time.sleep(5)

@@ -119,10 +119,10 @@ Professional Approach:
 
 🚀 Recommended Implementation Order:
 
-1. Fix Sleep Issue First (Option A or C) - Quick win
-2. Test Multi-Instrument with 2-3 major pairs
-3. Scale Up once stable
-4. Consider VPS for 24/7 operation
+
+1. Test Multi-Instrument with 2-3 major pairs
+2. Scale Up once stable
+3. Consider VPS for 24/7 operation
    ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
    │ Multi-Instrument Trading Implementation Plan │
    │ │
@@ -152,7 +152,7 @@ Professional Approach:
    │ better risk distribution✅ Professional portfolio-level management✅ Maintains existing trailing stop system across all instruments │
    │ │
    │ Files to be modified: │
-   │ - live_rsi_trader.py (add sleep prevention + multi-threading) │
+   │ - live_rsi_trader.py (multi-instrument multi-threading) │
    │ - config/trading_params.yaml (multi-instrument structure) │
    │ - Create new core/instrument_trader.py (individual instrument handler) │
    │ │

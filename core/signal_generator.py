@@ -334,3 +334,182 @@ class ImprovedRSIEntry:
             'extreme_oversold_level': self.extreme_oversold_level,
             'extreme_overbought_level': self.extreme_overbought_level
         }
+
+
+class MinimalFilterRSIEntry:
+    """
+    Minimal filtering RSI entry system with momentum confirmation.
+    Optimized for live trading with configurable momentum threshold.
+    """
+    
+    def __init__(self, rsi_oversold=30, rsi_overbought=70, rsi_exit_level=50, 
+                 momentum_threshold=2.0, use_momentum_filter=True):
+        """
+        Initialize minimal filter RSI entry system
+        
+        Args:
+            rsi_oversold (float): RSI oversold level (default: 30)
+            rsi_overbought (float): RSI overbought level (default: 70)
+            rsi_exit_level (float): RSI exit level (default: 50)
+            momentum_threshold (float): Minimum RSI points change for entry (default: 2.0)
+            use_momentum_filter (bool): Enable momentum confirmation (default: True)
+        """
+        self.rsi_oversold = rsi_oversold
+        self.rsi_overbought = rsi_overbought
+        self.rsi_exit_level = rsi_exit_level
+        self.momentum_threshold = momentum_threshold
+        self.use_momentum_filter = use_momentum_filter
+        
+        # Store previous RSI for momentum calculation
+        self.previous_rsi = None
+    
+    def should_enter_buy(self, current_rsi, previous_rsi=None):
+        """
+        Check if should enter BUY position with momentum confirmation
+        
+        Args:
+            current_rsi (float): Current RSI value
+            previous_rsi (float, optional): Previous RSI value for momentum check
+            
+        Returns:
+            bool: True if should enter BUY position
+        """
+        # Use stored previous RSI if not provided
+        if previous_rsi is None:
+            previous_rsi = self.previous_rsi
+        
+        # Update stored previous RSI for next call
+        self.previous_rsi = current_rsi
+        
+        # Basic oversold condition
+        basic_oversold = current_rsi < self.rsi_oversold
+        
+        # If momentum filter is disabled, use basic condition
+        if not self.use_momentum_filter:
+            return basic_oversold
+        
+        # Momentum filtering requires previous RSI
+        if previous_rsi is None:
+            return False
+            
+        # Momentum conditions
+        was_oversold = previous_rsi < self.rsi_oversold
+        meaningful_recovery = current_rsi > previous_rsi + self.momentum_threshold
+        avoid_falling_knife = current_rsi > 15  # Avoid extreme scenarios
+        
+        return was_oversold and meaningful_recovery and avoid_falling_knife
+    
+    def should_enter_sell(self, current_rsi, previous_rsi=None):
+        """
+        Check if should enter SELL position with momentum confirmation
+        
+        Args:
+            current_rsi (float): Current RSI value
+            previous_rsi (float, optional): Previous RSI value for momentum check
+            
+        Returns:
+            bool: True if should enter SELL position
+        """
+        # Use stored previous RSI if not provided
+        if previous_rsi is None:
+            previous_rsi = self.previous_rsi
+        
+        # Update stored previous RSI for next call
+        self.previous_rsi = current_rsi
+        
+        # Basic overbought condition
+        basic_overbought = current_rsi > self.rsi_overbought
+        
+        # If momentum filter is disabled, use basic condition
+        if not self.use_momentum_filter:
+            return basic_overbought
+        
+        # Momentum filtering requires previous RSI
+        if previous_rsi is None:
+            return False
+            
+        # Momentum conditions
+        was_overbought = previous_rsi > self.rsi_overbought
+        meaningful_decline = current_rsi < previous_rsi - self.momentum_threshold
+        avoid_rising_dagger = current_rsi < 85  # Avoid extreme scenarios
+        
+        return was_overbought and meaningful_decline and avoid_rising_dagger
+    
+    def should_exit_buy(self, current_rsi):
+        """
+        Check if should exit BUY position based on current RSI
+        
+        Args:
+            current_rsi (float): Current RSI value
+            
+        Returns:
+            bool: True if should exit BUY position
+        """
+        return current_rsi > self.rsi_exit_level
+    
+    def should_exit_sell(self, current_rsi):
+        """
+        Check if should exit SELL position based on current RSI
+        
+        Args:
+            current_rsi (float): Current RSI value
+            
+        Returns:
+            bool: True if should exit SELL position
+        """
+        return current_rsi < self.rsi_exit_level
+    
+    def generate_entry_signals_vectorized(self, df):
+        """
+        Generate entry signals for entire DataFrame (for backtesting)
+        
+        Args:
+            df (pd.DataFrame): DataFrame with RSI values
+            
+        Returns:
+            pd.DataFrame: DataFrame with added 'minimal_filter_signal' column
+        """
+        df = df.copy()
+        df['minimal_filter_signal'] = 0
+        
+        rsi = df['rsi']
+        rsi_prev = df['rsi'].shift(1)
+        
+        if self.use_momentum_filter:
+            # Momentum filtering logic
+            buy_signals = (
+                (rsi_prev < self.rsi_oversold) &                           # Was oversold
+                (rsi > rsi_prev + self.momentum_threshold) &               # Now turning up meaningfully
+                (rsi > 15)                                                 # Avoid extreme falling knives
+            )
+            
+            sell_signals = (
+                (rsi_prev > self.rsi_overbought) &                         # Was overbought  
+                (rsi < rsi_prev - self.momentum_threshold) &               # Now turning down meaningfully
+                (rsi < 85)                                                 # Avoid extreme scenarios
+            )
+        else:
+            # Basic RSI threshold logic
+            buy_signals = rsi < self.rsi_oversold
+            sell_signals = rsi > self.rsi_overbought
+        
+        # Assign signals
+        df.loc[buy_signals, 'minimal_filter_signal'] = 1
+        df.loc[sell_signals, 'minimal_filter_signal'] = -1
+        
+        return df
+    
+    def get_signal_summary(self):
+        """
+        Get summary of current signal parameters
+        
+        Returns:
+            dict: Dictionary with current signal parameters
+        """
+        return {
+            'rsi_oversold': self.rsi_oversold,
+            'rsi_overbought': self.rsi_overbought,
+            'rsi_exit_level': self.rsi_exit_level,
+            'momentum_threshold': self.momentum_threshold,
+            'use_momentum_filter': self.use_momentum_filter
+        }
