@@ -472,8 +472,10 @@ def live_trading_loop():
         logger.info(f"   Breakeven: {trailing_stop_manager.breakeven_trigger} ATR")
         logger.info(f"   Trail Distance: {trailing_stop_manager.trail_distance} ATR") 
         logger.info(f"   Hard Stop: {trailing_stop_manager.hard_stop_distance} ATR")
+        logger.info(f"   Exit Strategy: ATR Trailing Stops (RSI exits DISABLED)")
     else:
         logger.info(f"ATR Stop Loss: {'Enabled' if use_atr_stop else 'Disabled'}, Period: {atr_period}, Multiplier: {atr_multiplier}")
+        logger.info(f"   Exit Strategy: RSI Level {rsi_exit_level} (Trailing stops DISABLED)")
     
     last_bar_time = None
     previous_rsi = None  # Store previous RSI for momentum calculation
@@ -603,22 +605,28 @@ def live_trading_loop():
                     if result:
                         logger.info(f"[SUCCESS] SELL position opened at {current_price:.5f}")
                 
-                # Exit signals using modular signal generator
-                if has_buy_position and signal_generator.should_exit_buy(current_rsi):
-                    logger.info(f"EXIT BUY SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_exit_level}")
-                    for pos in positions:
-                        if pos.type == mt5.ORDER_TYPE_BUY:
-                            result = close_position(pos)
-                            if result:
-                                logger.info(f"[SUCCESS] BUY position closed at {current_price:.5f}")
-                
-                elif has_sell_position and signal_generator.should_exit_sell(current_rsi):
-                    logger.info(f"EXIT SELL SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_exit_level}")
-                    for pos in positions:
-                        if pos.type == mt5.ORDER_TYPE_SELL:
-                            result = close_position(pos)
-                            if result:
-                                logger.info(f"[SUCCESS] SELL position closed at {current_price:.5f}")
+                # Exit signals - ONLY use RSI exits when trailing stops are DISABLED
+                if trailing_stop_manager is None:
+                    # Use RSI-based exits when trailing stops are disabled
+                    if has_buy_position and signal_generator.should_exit_buy(current_rsi):
+                        logger.info(f"EXIT BUY SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_exit_level}")
+                        for pos in positions:
+                            if pos.type == mt5.ORDER_TYPE_BUY:
+                                result = close_position(pos)
+                                if result:
+                                    logger.info(f"[SUCCESS] BUY position closed at {current_price:.5f}")
+                    
+                    elif has_sell_position and signal_generator.should_exit_sell(current_rsi):
+                        logger.info(f"EXIT SELL SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_exit_level}")
+                        for pos in positions:
+                            if pos.type == mt5.ORDER_TYPE_SELL:
+                                result = close_position(pos)
+                                if result:
+                                    logger.info(f"[SUCCESS] SELL position closed at {current_price:.5f}")
+                else:
+                    # Trailing stops are enabled - let them manage exits
+                    # RSI exits are disabled to prevent premature position closure
+                    pass
                 
                 # Update previous RSI for next iteration
                 previous_rsi = current_rsi
