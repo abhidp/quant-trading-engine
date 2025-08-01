@@ -86,3 +86,48 @@ class ATRCalculator:
         atr = tr.ewm(span=period, adjust=False).mean()
         
         return atr
+
+
+class EMACalculator:
+    """EMA (Exponential Moving Average) indicator calculator"""
+    
+    def __init__(self, period=20):
+        """
+        Initialize EMA calculator
+        
+        Args:
+            period (int): EMA calculation period (default: 20)
+        """
+        self.period = period
+    
+    def calculate(self, prices, period=None):
+        """
+        Calculate EMA for given price series
+        
+        Args:
+            prices (pd.Series): Price series (typically close prices)
+            period (int, optional): Override default period
+            
+        Returns:
+            pd.Series: EMA values
+        """
+        if period is None:
+            period = self.period
+            
+        return prices.ewm(span=period, adjust=False).mean()
+    
+    def calculate_multiple(self, prices, periods):
+        """
+        Calculate multiple EMAs for given price series
+        
+        Args:
+            prices (pd.Series): Price series (typically close prices)
+            periods (list): List of periods to calculate
+            
+        Returns:
+            dict: Dictionary with period as key and EMA series as value
+        """
+        result = {}
+        for period in periods:
+            result[f'ema_{period}'] = self.calculate(prices, period)
+        return result
