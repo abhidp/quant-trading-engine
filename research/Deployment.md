@@ -228,7 +228,7 @@ ssh sshuser@192.168.0.14 "taskkill /f /im python.exe"
 ✅ **Safe**: Version control with rollback capability  
 ✅ **Scalable**: Easy to add more trading projects
 
----
+--
 
 Workflow Summary:
 
