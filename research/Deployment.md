@@ -230,4 +230,8 @@ ssh sshuser@192.168.0.14 "taskkill /f /im python.exe"
 
 ---
 
-_Last updated: $(Get-Date -Format 'yyyy-MM-dd')_
+1. Code on Machine A
+2. ship-quant (commits, pushes to GitHub & local server, deploys to Machine B)
+3. RustDesk → navigate to C:\TradingBots\Projects\quant-trading-engine
+4. Activate venv and run your trading bot
+5. Monitor MT5 + console logs visually
