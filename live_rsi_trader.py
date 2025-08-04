@@ -188,7 +188,7 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
     # Get current price for stop validation
     tick_info = mt5.symbol_info_tick(symbol)
     if tick_info is None:
-        logger.error(f\"Could not get tick info for {symbol}\")
+        logger.error(f"Could not get tick info for {symbol}")
         return None
     current_price = tick_info.ask  # Use ask price for BUY orders
     
@@ -210,7 +210,7 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
         if is_valid and validated_stop is not None:
             request['sl'] = validated_stop
             if validated_stop != stop_loss:
-                logger.info(f\"BUY stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements\")
+                logger.info(f"BUY stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements")
     
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -262,7 +262,7 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
     # Get current price for stop validation
     tick_info = mt5.symbol_info_tick(symbol)
     if tick_info is None:
-        logger.error(f\"Could not get tick info for {symbol}\")
+        logger.error(f"Could not get tick info for {symbol}")
         return None
     current_price = tick_info.bid  # Use bid price for SELL orders
     
@@ -284,7 +284,7 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
         if is_valid and validated_stop is not None:
             request['sl'] = validated_stop
             if validated_stop != stop_loss:
-                logger.info(f\"SELL stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements\")
+                logger.info(f"SELL stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements")
     
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
