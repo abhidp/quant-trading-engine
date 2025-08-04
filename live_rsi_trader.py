@@ -138,7 +138,7 @@ def validate_stop_distance(symbol, current_price, stop_loss, order_type):
             return False, None
         
         # Get minimum stop distance (in points)
-        stops_level = symbol_info.stops_level
+        stops_level = symbol_info.trade_stops_level
         point = symbol_info.point
         
         # Convert points to price

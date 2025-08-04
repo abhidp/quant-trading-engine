@@ -19,29 +19,42 @@ class RSICalculator:
     
     def calculate(self, prices, period=None):
         """
-        Calculate RSI for given price series
+        Calculate RSI for given price series using MT5 standard EMA method
         
         Args:
             prices (pd.Series): Price series (typically close prices)
             period (int, optional): Override default period
             
         Returns:
-            pd.Series: RSI values
+            pd.Series: RSI values matching MT5 calculation
         """
         if period is None:
             period = self.period
             
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        delta = prices.diff().dropna()
         
-        # Handle case where loss is 0 (all gains) to avoid division by zero
-        loss = loss.replace(0, 0.0001)
+        # Separate gains and losses
+        gains = delta.where(delta > 0, 0)
+        losses = -delta.where(delta < 0, 0)
         
-        rs = gain / loss
+        # Calculate EMA of gains and losses using Wilder's smoothing (MT5 standard)
+        # MT5 uses alpha = 1/period for RSI calculation
+        alpha = 1.0 / period
+        
+        avg_gain = gains.ewm(alpha=alpha, adjust=False).mean()
+        avg_loss = losses.ewm(alpha=alpha, adjust=False).mean()
+        
+        # Handle division by zero
+        avg_loss = avg_loss.replace(0, 0.0001)
+        
+        rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
         
-        return rsi
+        # Reindex to match original prices series length
+        rsi_full = pd.Series(index=prices.index, dtype=float)
+        rsi_full.iloc[1:] = rsi  # Skip first value due to diff()
+        
+        return rsi_full
 
 
 class ATRCalculator:
