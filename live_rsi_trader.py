@@ -8,27 +8,23 @@ import pandas as pd
 import yaml
 
 # Import modular components
-from core.indicators import ATRCalculator, RSICalculator
+from core.indicators import ATRCalculator, RSICalculator, TrendFilter
 from core.risk_manager import RiskManager
 from core.signal_generator import RSISignalGenerator, MinimalFilterRSIEntry
 from core.trailing_stop_manager import TrailingStopManager, TrailingStopStrategy
 from data.mt5_connector import MT5Connector
 from utils.validation import DataValidator, ErrorHandler
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'logs/live_rsi_trader_{datetime.now().strftime("%Y%m%d")}.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# Import broker time utilities
+from utils.broker_time import setup_broker_time_logging
+
+# Setup logging with broker time synchronization
+logger = setup_broker_time_logging(logging.INFO)
 
 # Initialize modular components
 rsi_calculator = RSICalculator()
 atr_calculator = ATRCalculator()
+trend_filter = TrendFilter()
 risk_manager = RiskManager()
 signal_generator = RSISignalGenerator()
 data_validator = DataValidator()
@@ -150,7 +146,7 @@ def validate_stop_distance(symbol, current_price, stop_loss, order_type):
             if actual_distance < min_distance:
                 # Adjust stop loss to minimum required distance
                 adjusted_stop = current_price - min_distance
-                logger.warning(f"Stop loss too close for BUY: {stop_loss:.5f} -> {adjusted_stop:.5f} (min distance: {min_distance:.5f})")
+                logger.warning(f"{symbol} Stop loss too close for BUY: {stop_loss:.5f} -> {adjusted_stop:.5f} (min distance: {min_distance:.5f})")
                 return True, adjusted_stop
         else:
             # For SELL orders, stop loss should be above current price
@@ -158,13 +154,13 @@ def validate_stop_distance(symbol, current_price, stop_loss, order_type):
             if actual_distance < min_distance:
                 # Adjust stop loss to minimum required distance
                 adjusted_stop = current_price + min_distance
-                logger.warning(f"Stop loss too close for SELL: {stop_loss:.5f} -> {adjusted_stop:.5f} (min distance: {min_distance:.5f})")
+                logger.warning(f"{symbol} Stop loss too close for SELL: {stop_loss:.5f} -> {adjusted_stop:.5f} (min distance: {min_distance:.5f})")
                 return True, adjusted_stop
         
         return True, stop_loss  # No adjustment needed
         
     except Exception as e:
-        logger.error(f"Error validating stop distance: {e}")
+        logger.error(f"{symbol} Error validating stop distance: {e}")
         return False, None
 
 def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
@@ -210,14 +206,14 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
         if is_valid and validated_stop is not None:
             request['sl'] = validated_stop
             if validated_stop != stop_loss:
-                logger.info(f"BUY stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements")
+                logger.info(f"{symbol} BUY stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements")
     
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        logger.error(f"BUY order failed, retcode={result.retcode}, comment={result.comment}")
+        logger.error(f"{symbol} BUY order failed, retcode={result.retcode}, comment={result.comment}")
         return None
     
-    logger.info(f"BUY order successful: {result.order}, volume={volume}, price={result.price}")
+    logger.info(f"{symbol} BUY order successful: {result.order}, volume={volume}, price={result.price}")
     
     # Initialize trailing stop tracking if enabled
     if trailing_stop_manager is not None and result.order:
@@ -233,11 +229,11 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
                 has_correct_comment = 'RSI Strategy' in str(pos.comment)
                 
                 if is_buy_position and has_correct_comment and price_diff < 0.0002:
-                    logger.info(f"Found BUY position {pos.ticket} for tracking initialization")
+                    logger.info(f"{symbol} Found BUY position {pos.ticket} for tracking initialization")
                     initialize_position_tracking(pos, result.price)
                     break
             else:
-                logger.warning(f"Could not find BUY position for tracking - Order: {result.order}, Price: {result.price}")
+                logger.warning(f"{symbol} Could not find BUY position for tracking - Order: {result.order}, Price: {result.price}")
     
     return result
 
@@ -284,14 +280,14 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
         if is_valid and validated_stop is not None:
             request['sl'] = validated_stop
             if validated_stop != stop_loss:
-                logger.info(f"SELL stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements")
+                logger.info(f"{symbol} SELL stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements")
     
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        logger.error(f"SELL order failed, retcode={result.retcode}, comment={result.comment}")
+        logger.error(f"{symbol} SELL order failed, retcode={result.retcode}, comment={result.comment}")
         return None
     
-    logger.info(f"SELL order successful: {result.order}, volume={volume}, price={result.price}")
+    logger.info(f"{symbol} SELL order successful: {result.order}, volume={volume}, price={result.price}")
     
     # Initialize trailing stop tracking if enabled
     if trailing_stop_manager is not None and result.order:
@@ -307,7 +303,7 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
                 has_correct_comment = 'RSI Strategy' in str(pos.comment)
                 
                 if is_sell_position and has_correct_comment and price_diff < 0.0002:
-                    logger.info(f"Found SELL position {pos.ticket} for tracking initialization")
+                    logger.info(f"{symbol} Found SELL position {pos.ticket} for tracking initialization")
                     initialize_position_tracking(pos, result.price)
                     break
             else:
@@ -350,8 +346,8 @@ def initialize_position_tracking(mt5_position, entry_price):
             # Store in tracking dictionary
             position_tracking[mt5_position.ticket] = position_data
             
-            logger.info(f"Position {mt5_position.ticket} initialized for trailing stop tracking")
-            logger.info(f"Entry: {entry_price:.5f}, Initial Stop: {position_data['initial_stop']:.5f}")
+            logger.info(f"{symbol} Position {mt5_position.ticket} initialized for trailing stop tracking")
+            logger.info(f"{symbol} Entry: {entry_price:.5f}, Initial Stop: {position_data['initial_stop']:.5f}")
             
         else:
             logger.error(f"Could not get market data for ATR calculation")
@@ -392,7 +388,7 @@ def update_mt5_stop_loss(position_ticket, new_stop_loss):
         # Get current position info
         positions = mt5.positions_get(ticket=position_ticket)
         if not positions:
-            logger.error(f"Position {position_ticket} not found in MT5")
+            logger.error(f"{symbol} Position {position_ticket} not found in MT5")
             return None
             
         position = positions[0]
@@ -415,12 +411,12 @@ def update_mt5_stop_loss(position_ticket, new_stop_loss):
         # Validate stop distance
         is_valid, validated_stop = validate_stop_distance(symbol, current_price, new_stop_loss, order_type)
         if not is_valid or validated_stop is None:
-            logger.error(f"Invalid stop loss distance for position {position_ticket}: {new_stop_loss:.5f}")
+            logger.error(f"{symbol} Invalid stop loss distance for position {position_ticket}: {new_stop_loss:.5f}")
             return None
         
         # Log adjustment if needed
         if validated_stop != new_stop_loss:
-            logger.info(f"Stop loss adjusted for position {position_ticket}: {new_stop_loss:.5f} -> {validated_stop:.5f}")
+            logger.info(f"{symbol} Stop loss adjusted for position {position_ticket}: {new_stop_loss:.5f} -> {validated_stop:.5f}")
         
         # Prepare modification request
         request = {
@@ -432,15 +428,15 @@ def update_mt5_stop_loss(position_ticket, new_stop_loss):
         
         result = mt5.order_send(request)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
-            logger.info(f"Stop loss updated for position {position_ticket}: {validated_stop:.5f}")
+            logger.info(f"{symbol} Stop loss updated for position {position_ticket}: {validated_stop:.5f}")
             return validated_stop
         else:
-            logger.error(f"Failed to update stop loss for position {position_ticket}: "
+            logger.error(f"{symbol} Failed to update stop loss for position {position_ticket}: "
                         f"retcode={result.retcode}, comment={result.comment}")
             return None
             
     except Exception as e:
-        logger.error(f"Error updating stop loss for position {position_ticket}: {e}")
+        logger.error(f"{symbol} Error updating stop loss for position {position_ticket}: {e}")
         return None
 
 def close_position(position):
@@ -452,11 +448,11 @@ def close_position(position):
     # Remove from tracking if present
     if position_ticket in position_tracking:
         tracked_pos = position_tracking.pop(position_ticket)
-        logger.info(f"Position {position_ticket} removed from trailing stop tracking")
+        logger.info(f"{symbol} Position {position_ticket} removed from trailing stop tracking")
         
         # Log final statistics
         stats = trailing_stop_manager.get_stop_statistics(tracked_pos) if trailing_stop_manager else {}
-        logger.info(f"TRAILING STOP SUMMARY for Position {position_ticket}:")
+        logger.info(f"{symbol} TRAILING STOP SUMMARY for Position {position_ticket}:")
         logger.info(f"   Entry: {tracked_pos.get('entry', 'N/A'):.5f}")
         logger.info(f"   Initial Stop: {tracked_pos.get('initial_stop', 'N/A'):.5f}")
         logger.info(f"   Final Stop: {tracked_pos.get('stop_loss', 'N/A'):.5f}")
@@ -507,7 +503,7 @@ def close_position(position):
     
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        logger.error(f"Close position failed, retcode={result.retcode}, comment={result.comment}")
+        logger.error(f"{symbol} Close position failed, retcode={result.retcode}, comment={result.comment}")
         return None
     
     # Get actual P&L from MT5 (in account currency)
@@ -523,12 +519,12 @@ def close_position(position):
     
     if actual_pnl is not None:
         pnl_status = "PROFIT" if actual_pnl > 0 else "LOSS"
-        logger.info(f"POSITION CLOSED: Ticket={position.ticket}")
+        logger.info(f"{symbol} POSITION CLOSED: Ticket={position.ticket}")
         logger.info(f"   P&L: ${actual_pnl:.2f} ({pnl_status})")
         logger.info(f"   Exit Price: {current_price:.5f}")
         logger.info(f"   Exit Reason: {'Stop Loss Hit' if '[sl' in str(closing_deal.comment) else 'Manual Close'}")
     else:
-        logger.info(f"POSITION CLOSED: Ticket={position.ticket} (P&L unavailable)")
+        logger.info(f"{symbol} POSITION CLOSED: Ticket={position.ticket} (P&L unavailable)")
     
     return result
 
@@ -558,9 +554,17 @@ def live_trading_loop():
     rsi_momentum_threshold = params.get('rsi_momentum_threshold', 2.0)
     use_momentum_filter = params.get('use_momentum_filter', True)
     
+    # Trend filter parameters
+    trend_config = params.get('trend_filter', {})
+    use_trend_filter = trend_config.get('enabled', True)
+    trend_fast_ema = trend_config.get('fast_ema', 9)
+    trend_medium_ema = trend_config.get('medium_ema', 21)
+    trend_slow_ema = trend_config.get('slow_ema', 50)
+    
     # Initialize modular components with parameters
     rsi_calculator = RSICalculator(rsi_period)
     atr_calculator = ATRCalculator(atr_period)
+    trend_filter = TrendFilter(trend_fast_ema, trend_medium_ema, trend_slow_ema)
     
     # Choose signal generator based on momentum filter setting
     if use_momentum_filter:
@@ -577,6 +581,12 @@ def live_trading_loop():
     logger.info(f"Symbol: {symbol}, Timeframe: {params['timeframe']}")
     logger.info(f"RSI: {rsi_period} period, Entry: {rsi_oversold}/{rsi_overbought}, Exit: {rsi_exit_level}")
     logger.info(f"Position size: {lot_size} lots")
+    
+    if use_trend_filter:
+        logger.info(f"Trend Filter: ENABLED - EMA({trend_fast_ema}, {trend_medium_ema}, {trend_slow_ema})")
+        logger.info(f"   Anti-trend protection: Prevents trades against strong trends")
+    else:
+        logger.info(f"Trend Filter: DISABLED - All RSI signals allowed")
     
     if trailing_stop_manager:
         logger.info(f"ATR Trailing Stops: ENABLED - Strategy {current_trailing_strategy}")
@@ -629,6 +639,18 @@ def live_trading_loop():
                 df['atr'] = atr_calculator.calculate(df, atr_period)
                 current_atr = df['atr'].iloc[-1]
                 
+                # Calculate trend filter if enabled
+                trend_info = None
+                if use_trend_filter:
+                    trend_info = trend_filter.calculate_trend(df['close'])
+                    trend_direction = trend_info['direction']
+                    trend_strength = trend_info['strength']
+                    allow_buy = trend_info['allow_buy']
+                    allow_sell = trend_info['allow_sell']
+                else:
+                    allow_buy = True
+                    allow_sell = True
+                
                 bar_time = datetime.fromtimestamp(current_time)
                 # logger.info(f"New bar [{bar_time}] - Price: {current_price:.5f}, RSI: {current_rsi:.2f}")
                 
@@ -673,7 +695,7 @@ def live_trading_loop():
                     for closed_ticket in closed_tickets:
                         # Position was closed - log closure and clean up tracking
                         tracked_pos = position_tracking.pop(closed_ticket)
-                        logger.info(f"POSITION CLOSED DETECTED: Ticket {closed_ticket}")
+                        logger.info(f"{symbol} POSITION CLOSED DETECTED: Ticket {closed_ticket}")
                         
                         # Try to get closure details from MT5 history
                         try:
@@ -686,7 +708,7 @@ def live_trading_loop():
                                 pnl_status = "PROFIT" if actual_pnl > 0 else "LOSS"
                                 exit_reason = "Stop Loss Hit" if '[sl' in str(closing_deal.comment) else "Other"
                                 
-                                logger.info(f"   P&L: ${actual_pnl:.2f} ({pnl_status})")
+                                logger.info(f"   {symbol} P&L: ${actual_pnl:.2f} ({pnl_status})")
                                 logger.info(f"   Exit Price: {exit_price:.5f}")
                                 logger.info(f"   Exit Reason: {exit_reason}")
                                 logger.info(f"   Entry Price: {tracked_pos.get('entry', 'N/A'):.5f}")
@@ -694,12 +716,12 @@ def live_trading_loop():
                                 # Log trailing stop statistics
                                 if trailing_stop_manager:
                                     stats = trailing_stop_manager.get_stop_statistics(tracked_pos)
-                                    logger.info(f"   Stop Adjustments: {stats.get('total_adjustments', 0)}")
-                                    logger.info(f"   Breakeven Triggered: {stats.get('breakeven_triggered', False)}")
+                                    logger.info(f"   {symbol} Stop Adjustments: {stats.get('total_adjustments', 0)}")
+                                    logger.info(f"   {symbol} Breakeven Triggered: {stats.get('breakeven_triggered', False)}")
                                     if tracked_pos.get('highest_price'):
-                                        logger.info(f"   Peak Price: {tracked_pos['highest_price']:.5f}")
+                                        logger.info(f"   {symbol} Peak Price: {tracked_pos['highest_price']:.5f}")
                                     if tracked_pos.get('lowest_price'):
-                                        logger.info(f"   Lowest Price: {tracked_pos['lowest_price']:.5f}")
+                                        logger.info(f"   {symbol} Lowest Price: {tracked_pos['lowest_price']:.5f}")
                             else:
                                 logger.warning(f"   Could not retrieve closure details for position {closed_ticket}")
                         except Exception as e:
@@ -720,31 +742,69 @@ def live_trading_loop():
                 
                 if isinstance(signal_generator, MinimalFilterRSIEntry):
                     # Use momentum-aware entry signals
-                    should_buy = signal_generator.should_enter_buy(current_rsi, previous_rsi_calc)
-                    should_sell = signal_generator.should_enter_sell(current_rsi, previous_rsi_calc)
+                    should_buy_raw = signal_generator.should_enter_buy(current_rsi, previous_rsi_calc)
+                    should_sell_raw = signal_generator.should_enter_sell(current_rsi, previous_rsi_calc)
                     
-                    if should_buy:
+                    # Apply trend filter
+                    should_buy = should_buy_raw and allow_buy
+                    should_sell = should_sell_raw and allow_sell
+                    
+                    if should_buy_raw:
                         if use_momentum_filter and previous_rsi_calc is not None:
                             rsi_change = current_rsi - previous_rsi_calc
-                            logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} (was {previous_rsi_calc:.2f}, +{rsi_change:.2f} momentum)")
+                            if should_buy:
+                                logger.info(f"{symbol} BUY SIGNAL: RSI {current_rsi:.2f} (was {previous_rsi_calc:.2f}, +{rsi_change:.2f} momentum)")
+                                if use_trend_filter:
+                                    logger.info(f"{symbol} Trend: {trend_direction.upper()} ({trend_strength}) - BUY allowed")
+                            else:
+                                logger.info(f"{symbol} BUY signal blocked by trend filter: {trend_direction.upper()} ({trend_strength})")
                         else:
-                            logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
+                            if should_buy:
+                                logger.info(f"{symbol} BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
+                                if use_trend_filter:
+                                    logger.info(f"{symbol} Trend: {trend_direction.upper()} ({trend_strength}) - BUY allowed")
+                            else:
+                                logger.info(f"{symbol} BUY signal blocked by trend filter: {trend_direction.upper()} ({trend_strength})")
                     
-                    if should_sell:
+                    if should_sell_raw:
                         if use_momentum_filter and previous_rsi_calc is not None:
                             rsi_change = current_rsi - previous_rsi_calc
-                            logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} (was {previous_rsi_calc:.2f}, {rsi_change:.2f} momentum)")
+                            if should_sell:
+                                logger.info(f"{symbol} SELL SIGNAL: RSI {current_rsi:.2f} (was {previous_rsi_calc:.2f}, {rsi_change:.2f} momentum)")
+                                if use_trend_filter:
+                                    logger.info(f"{symbol} Trend: {trend_direction.upper()} ({trend_strength}) - SELL allowed")
+                            else:
+                                logger.info(f"{symbol} SELL signal blocked by trend filter: {trend_direction.upper()} ({trend_strength})")
                         else:
-                            logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
+                            if should_sell:
+                                logger.info(f"{symbol} SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
+                                if use_trend_filter:
+                                    logger.info(f"{symbol} Trend: {trend_direction.upper()} ({trend_strength}) - SELL allowed")
+                            else:
+                                logger.info(f"{symbol} SELL signal blocked by trend filter: {trend_direction.upper()} ({trend_strength})")
                 else:
                     # Use standard RSI signal generator
-                    should_buy = signal_generator.should_enter_buy(current_rsi)
-                    should_sell = signal_generator.should_enter_sell(current_rsi)
+                    should_buy_raw = signal_generator.should_enter_buy(current_rsi)
+                    should_sell_raw = signal_generator.should_enter_sell(current_rsi)
                     
-                    if should_buy:
-                        logger.info(f"BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
-                    if should_sell:
-                        logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
+                    # Apply trend filter
+                    should_buy = should_buy_raw and allow_buy
+                    should_sell = should_sell_raw and allow_sell
+                    
+                    if should_buy_raw:
+                        if should_buy:
+                            logger.info(f"{symbol} BUY SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_oversold}")
+                            if use_trend_filter:
+                                logger.info(f"{symbol} Trend: {trend_direction.upper()} ({trend_strength}) - BUY allowed")
+                        else:
+                            logger.info(f"{symbol} BUY signal blocked by trend filter: {trend_direction.upper()} ({trend_strength})")
+                    if should_sell_raw:
+                        if should_sell:
+                            logger.info(f"{symbol} SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
+                            if use_trend_filter:
+                                logger.info(f"{symbol} Trend: {trend_direction.upper()} ({trend_strength}) - SELL allowed")
+                        else:
+                            logger.info(f"{symbol} SELL signal blocked by trend filter: {trend_direction.upper()} ({trend_strength})")
                 
                 if should_buy and not has_any_position:
                     # Final safety check - verify no positions exist right before placing order
@@ -758,17 +818,17 @@ def live_trading_loop():
                     if trailing_stop_manager:
                         # Use trailing stop system - calculate initial hard stop
                         stop_loss = current_price - (trailing_stop_manager.hard_stop_distance * current_atr)
-                        logger.info(f"Initial Hard Stop: {stop_loss:.5f} (Trailing stops will manage from here)")
+                        logger.info(f"{symbol} Initial Hard Stop: {stop_loss:.5f} (Trailing stops will manage from here)")
                     elif use_atr_stop:
                         # Fallback to legacy ATR stop
                         stop_loss = risk_manager.calculate_atr_stop_loss(
                             current_price, current_atr, atr_multiplier, 'buy'
                         )
-                        logger.info(f"Legacy ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
+                        logger.info(f"{symbol} Legacy ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
                     
                     result = place_buy_order(symbol, lot_size, stop_loss)
                     if result:
-                        logger.info(f"BUY POSITION OPENED:")
+                        logger.info(f"{symbol} BUY POSITION OPENED:")
                         logger.info(f"   Entry Price: {current_price:.5f}")
                         logger.info(f"   Initial Stop: {stop_loss:.5f}" if stop_loss else "   No Stop Loss")
                         logger.info(f"   Position Size: {lot_size} lots")
@@ -786,17 +846,17 @@ def live_trading_loop():
                     if trailing_stop_manager:
                         # Use trailing stop system - calculate initial hard stop
                         stop_loss = current_price + (trailing_stop_manager.hard_stop_distance * current_atr)
-                        logger.info(f"Initial Hard Stop: {stop_loss:.5f} (Trailing stops will manage from here)")
+                        logger.info(f"{symbol} Initial Hard Stop: {stop_loss:.5f} (Trailing stops will manage from here)")
                     elif use_atr_stop:
                         # Fallback to legacy ATR stop
                         stop_loss = risk_manager.calculate_atr_stop_loss(
                             current_price, current_atr, atr_multiplier, 'sell'
                         )
-                        logger.info(f"Legacy ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
+                        logger.info(f"{symbol} Legacy ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
                     
                     result = place_sell_order(symbol, lot_size, stop_loss)
                     if result:
-                        logger.info(f"SELL POSITION OPENED:")
+                        logger.info(f"{symbol} SELL POSITION OPENED:")
                         logger.info(f"   Entry Price: {current_price:.5f}")
                         logger.info(f"   Initial Stop: {stop_loss:.5f}" if stop_loss else "   No Stop Loss")
                         logger.info(f"   Position Size: {lot_size} lots")
@@ -806,20 +866,20 @@ def live_trading_loop():
                 if trailing_stop_manager is None:
                     # Use RSI-based exits when trailing stops are disabled
                     if has_buy_position and signal_generator.should_exit_buy(current_rsi):
-                        logger.info(f"EXIT BUY SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_exit_level}")
+                        logger.info(f"{symbol} EXIT BUY SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_exit_level}")
                         for pos in positions:
                             if pos.type == mt5.ORDER_TYPE_BUY:
                                 result = close_position(pos)
                                 if result:
-                                    logger.info(f"[SUCCESS] BUY position closed at {current_price:.5f}")
+                                    logger.info(f"{symbol} [SUCCESS] BUY position closed at {current_price:.5f}")
                     
                     elif has_sell_position and signal_generator.should_exit_sell(current_rsi):
-                        logger.info(f"EXIT SELL SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_exit_level}")
+                        logger.info(f"{symbol} EXIT SELL SIGNAL: RSI {current_rsi:.2f} < {signal_generator.rsi_exit_level}")
                         for pos in positions:
                             if pos.type == mt5.ORDER_TYPE_SELL:
                                 result = close_position(pos)
                                 if result:
-                                    logger.info(f"[SUCCESS] SELL position closed at {current_price:.5f}")
+                                    logger.info(f"{symbol} [SUCCESS] SELL position closed at {current_price:.5f}")
                 else:
                     # Trailing stops are enabled - let them manage exits
                     # RSI exits are disabled to prevent premature position closure

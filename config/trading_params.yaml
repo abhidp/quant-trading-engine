@@ -1,5 +1,5 @@
 trading_params:
-  instrument: 'AUDUSDx'
+  instrument: 'XAUUSDx'
   timeframe: 'M1'
   lot_size: 0.50
   contract_size: 100000
@@ -13,13 +13,21 @@ trading_params:
   use_cache: true
   cache_dir: 'data/cache'
   rsi_period: 14
-  rsi_oversold: 30
-  rsi_overbought: 70
+  rsi_oversold: 35
+  rsi_overbought: 65
   rsi_exit_level: 50
 
   # RSI Momentum Filtering
   rsi_momentum_threshold: 2.0 # Minimum RSI points change required for entry signal
   use_momentum_filter: true # Enable/disable momentum confirmation
+
+  # Trend Filter (prevents counter-trend trades)
+  trend_filter:
+    enabled: true # Enable/disable trend filtering
+    fast_ema: 9 # Fast EMA period
+    medium_ema: 21 # Medium EMA period  
+    slow_ema: 50 # Slow EMA period
+    strength_threshold: 0.002 # Minimum strength for strong trend (0.2%)
 
   # ATR Stop Loss parameters (Legacy - for reference)
   use_atr_stop: false # Disabled in favor of trailing stops
@@ -29,7 +37,7 @@ trading_params:
   # ATR Trailing Stop System
   trailing_stops:
     enabled: true
-    strategy: 'C' # Options: A (Pure), B (Time-based), C (Aggressive)
+    strategy: 'B' # Options: A (Pure), B (Time-based), C (Aggressive)
     allow_runtime_changes: true
     config_check_interval: 6000 # Check for config changes every N seconds
 
