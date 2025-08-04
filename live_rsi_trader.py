@@ -129,6 +129,44 @@ def get_current_positions(symbol):
         return []
     return list(positions)
 
+def validate_stop_distance(symbol, current_price, stop_loss, order_type):
+    """Validate stop loss distance meets broker requirements"""
+    try:
+        symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            logger.error(f"Could not get symbol info for {symbol}")
+            return False, None
+        
+        # Get minimum stop distance (in points)
+        stops_level = symbol_info.stops_level
+        point = symbol_info.point
+        
+        # Convert points to price
+        min_distance = stops_level * point
+        
+        if order_type == 'buy':
+            # For BUY orders, stop loss should be below current price
+            actual_distance = current_price - stop_loss
+            if actual_distance < min_distance:
+                # Adjust stop loss to minimum required distance
+                adjusted_stop = current_price - min_distance
+                logger.warning(f"Stop loss too close for BUY: {stop_loss:.5f} -> {adjusted_stop:.5f} (min distance: {min_distance:.5f})")
+                return True, adjusted_stop
+        else:
+            # For SELL orders, stop loss should be above current price
+            actual_distance = stop_loss - current_price
+            if actual_distance < min_distance:
+                # Adjust stop loss to minimum required distance
+                adjusted_stop = current_price + min_distance
+                logger.warning(f"Stop loss too close for SELL: {stop_loss:.5f} -> {adjusted_stop:.5f} (min distance: {min_distance:.5f})")
+                return True, adjusted_stop
+        
+        return True, stop_loss  # No adjustment needed
+        
+    except Exception as e:
+        logger.error(f"Error validating stop distance: {e}")
+        return False, None
+
 def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
     """Place a BUY market order"""
     # Get symbol info to determine correct filling mode
@@ -147,6 +185,13 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
     else:  # Return (partial fills allowed)
         filling_mode = mt5.ORDER_FILLING_RETURN
     
+    # Get current price for stop validation
+    tick_info = mt5.symbol_info_tick(symbol)
+    if tick_info is None:
+        logger.error(f\"Could not get tick info for {symbol}\")
+        return None
+    current_price = tick_info.ask  # Use ask price for BUY orders
+    
     request = {
         'action': mt5.TRADE_ACTION_DEAL,
         'symbol': symbol,
@@ -159,9 +204,13 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
         'type_filling': filling_mode,
     }
     
-    # Add stop loss if provided
+    # Add stop loss if provided - validate distance first
     if stop_loss is not None:
-        request['sl'] = stop_loss
+        is_valid, validated_stop = validate_stop_distance(symbol, current_price, stop_loss, 'buy')
+        if is_valid and validated_stop is not None:
+            request['sl'] = validated_stop
+            if validated_stop != stop_loss:
+                logger.info(f\"BUY stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements\")
     
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -210,6 +259,13 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
     else:  # Return (partial fills allowed)
         filling_mode = mt5.ORDER_FILLING_RETURN
     
+    # Get current price for stop validation
+    tick_info = mt5.symbol_info_tick(symbol)
+    if tick_info is None:
+        logger.error(f\"Could not get tick info for {symbol}\")
+        return None
+    current_price = tick_info.bid  # Use bid price for SELL orders
+    
     request = {
         'action': mt5.TRADE_ACTION_DEAL,
         'symbol': symbol,
@@ -222,9 +278,13 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
         'type_filling': filling_mode,
     }
     
-    # Add stop loss if provided
+    # Add stop loss if provided - validate distance first
     if stop_loss is not None:
-        request['sl'] = stop_loss
+        is_valid, validated_stop = validate_stop_distance(symbol, current_price, stop_loss, 'sell')
+        if is_valid and validated_stop is not None:
+            request['sl'] = validated_stop
+            if validated_stop != stop_loss:
+                logger.info(f\"SELL stop loss adjusted from {stop_loss:.5f} to {validated_stop:.5f} for broker requirements\")
     
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -336,19 +396,44 @@ def update_mt5_stop_loss(position_ticket, new_stop_loss):
             return None
             
         position = positions[0]
+        symbol = position.symbol
+        
+        # Get current market price for validation
+        tick_info = mt5.symbol_info_tick(symbol)
+        if tick_info is None:
+            logger.error(f"Could not get tick info for {symbol}")
+            return None
+        
+        # Determine order type and current price
+        if position.type == mt5.ORDER_TYPE_BUY:
+            current_price = tick_info.bid  # BUY positions close at bid
+            order_type = 'buy'
+        else:
+            current_price = tick_info.ask  # SELL positions close at ask
+            order_type = 'sell'
+        
+        # Validate stop distance
+        is_valid, validated_stop = validate_stop_distance(symbol, current_price, new_stop_loss, order_type)
+        if not is_valid or validated_stop is None:
+            logger.error(f"Invalid stop loss distance for position {position_ticket}: {new_stop_loss:.5f}")
+            return None
+        
+        # Log adjustment if needed
+        if validated_stop != new_stop_loss:
+            logger.info(f"Stop loss adjusted for position {position_ticket}: {new_stop_loss:.5f} -> {validated_stop:.5f}")
         
         # Prepare modification request
         request = {
             'action': mt5.TRADE_ACTION_SLTP,
             'position': position_ticket,
-            'sl': new_stop_loss,
+            'sl': validated_stop,
             'tp': position.tp,  # Keep existing take profit
         }
         
         result = mt5.order_send(request)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
-            logger.info(f"Stop loss updated for position {position_ticket}: {new_stop_loss:.5f}")
-            return new_stop_loss
+            logger.info(f"Stop loss updated for position {position_ticket}: {validated_stop:.5f}")
+            return validated_stop
         else:
             logger.error(f"Failed to update stop loss for position {position_ticket}: "
                         f"retcode={result.retcode}, comment={result.comment}")
@@ -550,16 +635,75 @@ def live_trading_loop():
                 # Check for configuration updates (hot-reload)
                 params = check_config_updates(params)
                 
-                # Get current positions
+                # Get current positions with multiple checks to ensure accuracy
                 positions = get_current_positions(symbol)
                 has_buy_position = any(pos.type == mt5.ORDER_TYPE_BUY for pos in positions)
                 has_sell_position = any(pos.type == mt5.ORDER_TYPE_SELL for pos in positions)
                 has_any_position = has_buy_position or has_sell_position
                 
+                # Double-check position status with a slight delay if we think there are no positions
+                # This prevents race conditions where MT5 hasn't updated position status yet
+                if not has_any_position:
+                    time.sleep(0.1)  # Brief delay
+                    positions_recheck = get_current_positions(symbol)
+                    has_buy_position_recheck = any(pos.type == mt5.ORDER_TYPE_BUY for pos in positions_recheck)
+                    has_sell_position_recheck = any(pos.type == mt5.ORDER_TYPE_SELL for pos in positions_recheck)
+                    has_any_position_recheck = has_buy_position_recheck or has_sell_position_recheck
+                    
+                    if has_any_position_recheck:
+                        logger.info(f"Position recheck found existing positions - preventing duplicate entry")
+                        has_any_position = True
+                        has_buy_position = has_buy_position_recheck
+                        has_sell_position = has_sell_position_recheck
+                        positions = positions_recheck
+                
                 # Log position status for debugging
                 if has_any_position:
                     active_positions = [f"{pos.ticket}({pos.type})" for pos in positions]
                     logger.info(f"Active positions: {active_positions}")
+                
+                # Check for closed positions and clean up tracking
+                if position_tracking:
+                    # Get list of currently open position tickets
+                    open_tickets = {pos.ticket for pos in positions}
+                    
+                    # Find positions that were being tracked but are now closed
+                    closed_tickets = set(position_tracking.keys()) - open_tickets
+                    
+                    for closed_ticket in closed_tickets:
+                        # Position was closed - log closure and clean up tracking
+                        tracked_pos = position_tracking.pop(closed_ticket)
+                        logger.info(f"POSITION CLOSED DETECTED: Ticket {closed_ticket}")
+                        
+                        # Try to get closure details from MT5 history
+                        try:
+                            deals = mt5.history_deals_get(position=closed_ticket)
+                            if deals and len(deals) >= 2:
+                                closing_deal = deals[-1]  # Last deal is the closing deal
+                                actual_pnl = closing_deal.profit
+                                exit_price = closing_deal.price
+                                
+                                pnl_status = "PROFIT" if actual_pnl > 0 else "LOSS"
+                                exit_reason = "Stop Loss Hit" if '[sl' in str(closing_deal.comment) else "Other"
+                                
+                                logger.info(f"   P&L: ${actual_pnl:.2f} ({pnl_status})")
+                                logger.info(f"   Exit Price: {exit_price:.5f}")
+                                logger.info(f"   Exit Reason: {exit_reason}")
+                                logger.info(f"   Entry Price: {tracked_pos.get('entry', 'N/A'):.5f}")
+                                
+                                # Log trailing stop statistics
+                                if trailing_stop_manager:
+                                    stats = trailing_stop_manager.get_stop_statistics(tracked_pos)
+                                    logger.info(f"   Stop Adjustments: {stats.get('total_adjustments', 0)}")
+                                    logger.info(f"   Breakeven Triggered: {stats.get('breakeven_triggered', False)}")
+                                    if tracked_pos.get('highest_price'):
+                                        logger.info(f"   Peak Price: {tracked_pos['highest_price']:.5f}")
+                                    if tracked_pos.get('lowest_price'):
+                                        logger.info(f"   Lowest Price: {tracked_pos['lowest_price']:.5f}")
+                            else:
+                                logger.warning(f"   Could not retrieve closure details for position {closed_ticket}")
+                        except Exception as e:
+                            logger.error(f"   Error retrieving closure details: {e}")
                 
                 # Update trailing stops for existing positions
                 if trailing_stop_manager and position_tracking:
@@ -603,6 +747,11 @@ def live_trading_loop():
                         logger.info(f"SELL SIGNAL: RSI {current_rsi:.2f} > {signal_generator.rsi_overbought}")
                 
                 if should_buy and not has_any_position:
+                    # Final safety check - verify no positions exist right before placing order
+                    final_positions_check = get_current_positions(symbol)
+                    if any(pos.type == mt5.ORDER_TYPE_BUY for pos in final_positions_check) or any(pos.type == mt5.ORDER_TYPE_SELL for pos in final_positions_check):
+                        logger.warning(f"DUPLICATE PREVENTION: Found existing position during final check - skipping BUY order")
+                        continue
                     
                     # Calculate initial stop loss
                     stop_loss = None
@@ -626,6 +775,11 @@ def live_trading_loop():
                         logger.info(f"   Strategy: MinimalFilter RSI + ATR Trailing Stops")
                 
                 elif should_sell and not has_any_position:
+                    # Final safety check - verify no positions exist right before placing order
+                    final_positions_check = get_current_positions(symbol)
+                    if any(pos.type == mt5.ORDER_TYPE_BUY for pos in final_positions_check) or any(pos.type == mt5.ORDER_TYPE_SELL for pos in final_positions_check):
+                        logger.warning(f"DUPLICATE PREVENTION: Found existing position during final check - skipping SELL order")
+                        continue
                     
                     # Calculate initial stop loss
                     stop_loss = None
