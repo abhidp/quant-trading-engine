@@ -4,3 +4,5 @@ numpy
 matplotlib
 PyYAML
 seaborn
+pytest
+pytest-cov  # For coverage reports

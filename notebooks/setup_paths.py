@@ -28,7 +28,7 @@ print(f"   Utils modules available: {os.path.exists(os.path.join(project_root, '
 
 # Test imports
 try:
-    from core.indicators import RSICalculator
+    from core.indicators.oscillators import RSICalculator
     print("Core modules import successful")
 except ImportError as e:
     print(f"Core modules import failed: {e}")

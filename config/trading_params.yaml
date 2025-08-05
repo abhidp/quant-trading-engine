@@ -1,5 +1,5 @@
 trading_params:
-  instrument: 'GBPUSDx'
+  instrument: 'XAUUSDx'
   timeframe: 'M1'
   lot_size: 0.50
   contract_size: 100000
@@ -17,6 +17,18 @@ trading_params:
   rsi_overbought: 65
   rsi_exit_level: 50
 
+  # RSI Momentum Filtering
+  rsi_momentum_threshold: 2.0 # Minimum RSI points change required for entry signal
+  use_momentum_filter: true # Enable/disable momentum confirmation
+
+  # Trend Filter (prevents counter-trend trades)
+  trend_filter:
+    enabled: false # Enable/disable trend filtering
+    fast_ema: 12 # Fast EMA
+    medium_ema: 26 # Medium EMA
+    slow_ema: 50 # Slow EMA
+    strength_threshold: 0.002 # Minimum strength for strong trend (0.2%)
+
   # ATR Stop Loss parameters (Legacy - for reference)
   use_atr_stop: false # Disabled in favor of trailing stops
   atr_period: 14
@@ -27,7 +39,7 @@ trading_params:
     enabled: true
     strategy: 'C' # Options: A (Pure), B (Time-based), C (Aggressive)
     allow_runtime_changes: true
-    config_check_interval: 60 # Check for config changes every N seconds
+    config_check_interval: 6000 # Check for config changes every N seconds
 
 
     # Strategy Descriptions:
