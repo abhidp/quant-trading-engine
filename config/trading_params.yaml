@@ -23,9 +23,9 @@ trading_params:
 
   # Trend Filter (prevents counter-trend trades)
   trend_filter:
-    enabled: true # Enable/disable trend filtering
-    fast_ema: 12 # Fast EMA 
-    medium_ema: 26 # Medium EMA 
+    enabled: false # Enable/disable trend filtering
+    fast_ema: 12 # Fast EMA
+    medium_ema: 26 # Medium EMA
     slow_ema: 50 # Slow EMA
     strength_threshold: 0.002 # Minimum strength for strong trend (0.2%)
 
@@ -37,7 +37,7 @@ trading_params:
   # ATR Trailing Stop System
   trailing_stops:
     enabled: true
-    strategy: 'B' # Options: A (Pure), B (Time-based), C (Aggressive)
+    strategy: 'C' # Options: A (Pure), B (Time-based), C (Aggressive)
     allow_runtime_changes: true
     config_check_interval: 6000 # Check for config changes every N seconds
 
