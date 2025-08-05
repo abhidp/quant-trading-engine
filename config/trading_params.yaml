@@ -24,9 +24,9 @@ trading_params:
   # Trend Filter (prevents counter-trend trades)
   trend_filter:
     enabled: true # Enable/disable trend filtering
-    fast_ema: 9 # Fast EMA period
-    medium_ema: 21 # Medium EMA period  
-    slow_ema: 50 # Slow EMA period
+    fast_ema: 12 # Fast EMA 
+    medium_ema: 26 # Medium EMA 
+    slow_ema: 50 # Slow EMA
     strength_threshold: 0.002 # Minimum strength for strong trend (0.2%)
 
   # ATR Stop Loss parameters (Legacy - for reference)

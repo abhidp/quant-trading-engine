@@ -149,14 +149,14 @@ class EMACalculator:
 class TrendFilter:
     """Trend filter using multiple EMAs to identify trend direction and strength"""
     
-    def __init__(self, fast_period=9, medium_period=21, slow_period=50):
+    def __init__(self, fast_period=20, medium_period=50, slow_period=200):
         """
         Initialize trend filter
         
         Args:
-            fast_period (int): Fast EMA period (default: 9)
-            medium_period (int): Medium EMA period (default: 21)  
-            slow_period (int): Slow EMA period (default: 50)
+            fast_period (int): Fast EMA period (default: 20)
+            medium_period (int): Medium EMA period (default: 50)  
+            slow_period (int): Slow EMA period (default: 200)
         """
         self.fast_period = fast_period
         self.medium_period = medium_period
