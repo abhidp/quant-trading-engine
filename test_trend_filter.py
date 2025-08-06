@@ -4,7 +4,7 @@ Test the trend filter functionality and compare different EMA combinations
 import MetaTrader5 as mt5
 import pandas as pd
 import yaml
-from core.indicators import TrendFilter
+from core.indicators.trend import TrendFilter
 
 def test_ema_combination(df, fast, medium, slow, strength_threshold=0.003):
     """Test a specific EMA combination and return results"""
