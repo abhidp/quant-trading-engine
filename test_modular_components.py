@@ -4,7 +4,8 @@ This ensures identical calculations between notebook and live trader.
 """
 import pandas as pd
 import numpy as np
-from core.indicators import RSICalculator, ATRCalculator
+from core.indicators.oscillators import RSICalculator
+from core.indicators.volatility import ATRCalculator
 from core.risk_manager import RiskManager
 from core.signal_generator import RSISignalGenerator
 from utils.validation import DataValidator

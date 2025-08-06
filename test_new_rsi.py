@@ -3,7 +3,7 @@ Test the new EMA-based RSI calculation
 """
 import MetaTrader5 as mt5
 import pandas as pd
-from core.indicators import RSICalculator
+from core.indicators.oscillators import RSICalculator
 
 def main():
     # Initialize MT5
