@@ -660,30 +660,44 @@ def live_trading_loop():
                 
                 # Get current positions with multiple checks to ensure accuracy
                 positions = get_current_positions(symbol)
-                has_buy_position = any(pos.type == mt5.ORDER_TYPE_BUY for pos in positions)
-                has_sell_position = any(pos.type == mt5.ORDER_TYPE_SELL for pos in positions)
+                
+                # Filter to only bot-managed positions (those being tracked)
+                # This prevents manual trades from blocking bot signals
+                bot_positions = [pos for pos in positions if pos.ticket in position_tracking]
+                all_positions = positions  # Keep reference for logging all positions
+                
+                has_buy_position = any(pos.type == mt5.ORDER_TYPE_BUY for pos in bot_positions)
+                has_sell_position = any(pos.type == mt5.ORDER_TYPE_SELL for pos in bot_positions)
                 has_any_position = has_buy_position or has_sell_position
                 
-                # Double-check position status with a slight delay if we think there are no positions
+                # Double-check position status with a slight delay if we think there are no bot positions
                 # This prevents race conditions where MT5 hasn't updated position status yet
                 if not has_any_position:
                     time.sleep(0.1)  # Brief delay
                     positions_recheck = get_current_positions(symbol)
-                    has_buy_position_recheck = any(pos.type == mt5.ORDER_TYPE_BUY for pos in positions_recheck)
-                    has_sell_position_recheck = any(pos.type == mt5.ORDER_TYPE_SELL for pos in positions_recheck)
+                    bot_positions_recheck = [pos for pos in positions_recheck if pos.ticket in position_tracking]
+                    has_buy_position_recheck = any(pos.type == mt5.ORDER_TYPE_BUY for pos in bot_positions_recheck)
+                    has_sell_position_recheck = any(pos.type == mt5.ORDER_TYPE_SELL for pos in bot_positions_recheck)
                     has_any_position_recheck = has_buy_position_recheck or has_sell_position_recheck
                     
                     if has_any_position_recheck:
-                        logger.info(f"Position recheck found existing positions - preventing duplicate entry")
+                        logger.info(f"Position recheck found existing bot positions - preventing duplicate entry")
                         has_any_position = True
                         has_buy_position = has_buy_position_recheck
                         has_sell_position = has_sell_position_recheck
                         positions = positions_recheck
+                        bot_positions = bot_positions_recheck
                 
                 # Log position status for debugging
-                if has_any_position:
-                    active_positions = [f"{pos.ticket}({pos.type})" for pos in positions]
-                    logger.info(f"Active positions: {active_positions}")
+                if bot_positions:
+                    bot_positions_list = [f"{pos.ticket}({pos.type})" for pos in bot_positions]
+                    logger.info(f"Bot positions: {bot_positions_list}")
+                
+                # Log manual positions separately if they exist
+                manual_positions = [pos for pos in all_positions if pos.ticket not in position_tracking]
+                if manual_positions:
+                    manual_positions_list = [f"{pos.ticket}({pos.type})" for pos in manual_positions]
+                    logger.info(f"Manual positions (ignored): {manual_positions_list}")
                 
                 # Check for closed positions and clean up tracking
                 if position_tracking:
@@ -808,10 +822,11 @@ def live_trading_loop():
                             logger.info(f"{symbol} SELL signal blocked by trend filter: {trend_direction.upper()} ({trend_strength})")
                 
                 if should_buy and not has_any_position:
-                    # Final safety check - verify no positions exist right before placing order
+                    # Final safety check - verify no bot positions exist right before placing order
                     final_positions_check = get_current_positions(symbol)
-                    if any(pos.type == mt5.ORDER_TYPE_BUY for pos in final_positions_check) or any(pos.type == mt5.ORDER_TYPE_SELL for pos in final_positions_check):
-                        logger.warning(f"DUPLICATE PREVENTION: Found existing position during final check - skipping BUY order")
+                    final_bot_positions = [pos for pos in final_positions_check if pos.ticket in position_tracking]
+                    if any(pos.type == mt5.ORDER_TYPE_BUY for pos in final_bot_positions) or any(pos.type == mt5.ORDER_TYPE_SELL for pos in final_bot_positions):
+                        logger.warning(f"DUPLICATE PREVENTION: Found existing bot position during final check - skipping BUY order")
                         continue
                     
                     # Calculate initial stop loss
@@ -836,10 +851,11 @@ def live_trading_loop():
                         logger.info(f"   Strategy: MinimalFilter RSI + ATR Trailing Stops")
                 
                 elif should_sell and not has_any_position:
-                    # Final safety check - verify no positions exist right before placing order
+                    # Final safety check - verify no bot positions exist right before placing order
                     final_positions_check = get_current_positions(symbol)
-                    if any(pos.type == mt5.ORDER_TYPE_BUY for pos in final_positions_check) or any(pos.type == mt5.ORDER_TYPE_SELL for pos in final_positions_check):
-                        logger.warning(f"DUPLICATE PREVENTION: Found existing position during final check - skipping SELL order")
+                    final_bot_positions = [pos for pos in final_positions_check if pos.ticket in position_tracking]
+                    if any(pos.type == mt5.ORDER_TYPE_BUY for pos in final_bot_positions) or any(pos.type == mt5.ORDER_TYPE_SELL for pos in final_bot_positions):
+                        logger.warning(f"DUPLICATE PREVENTION: Found existing bot position during final check - skipping SELL order")
                         continue
                     
                     # Calculate initial stop loss
