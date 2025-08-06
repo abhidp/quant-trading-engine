@@ -519,12 +519,13 @@ def close_position(position):
     
     if actual_pnl is not None:
         pnl_status = "PROFIT" if actual_pnl > 0 else "LOSS"
-        logger.info(f"{symbol} POSITION CLOSED: Ticket={position.ticket}")
+        # exit_price = closing_deal.price  # Assign exit_price from closing_deal
+        logger.info(f"{symbol} {'BUY' if position.type == mt5.ORDER_TYPE_BUY else 'SELL'} POSITION CLOSED: Ticket={position.ticket}")
         logger.info(f"   P&L: ${actual_pnl:.2f} ({pnl_status})")
-        logger.info(f"   Exit Price: {current_price:.5f}")
+        logger.info(f"   Exit Price: {closing_deal.price:.5f}")
         logger.info(f"   Exit Reason: {'Stop Loss Hit' if '[sl' in str(closing_deal.comment) else 'Manual Close'}")
     else:
-        logger.info(f"{symbol} POSITION CLOSED: Ticket={position.ticket} (P&L unavailable)")
+        logger.info(f"{symbol} {'BUY' if position.type == mt5.ORDER_TYPE_BUY else 'SELL'} POSITION CLOSED: Ticket={position.ticket} (P&L unavailable)")
     
     return result
 
