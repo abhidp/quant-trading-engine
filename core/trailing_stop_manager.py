@@ -210,6 +210,15 @@ class TrailingStopStrategy:
         #     trail_distance=0.25,     # Tighter trailing
         #     hard_stop_distance=0.5
         # )
+
+    @staticmethod
+    def option_d_custom():
+        """Option D: Quick breakeven (looser initially, tighter over time)"""
+        return TrailingStopManager(
+            breakeven_trigger=1.0,
+            trail_distance=1.5,
+            hard_stop_distance=2.0
+        )
     
     @staticmethod
     def get_strategy(option: str) -> TrailingStopManager:
@@ -217,7 +226,8 @@ class TrailingStopStrategy:
         strategies = {
             'A': TrailingStopStrategy.option_a_pure_trailing,
             'B': TrailingStopStrategy.option_b_time_based,
-            'C': TrailingStopStrategy.option_c_aggressive
+            'C': TrailingStopStrategy.option_c_aggressive,
+            'D': TrailingStopStrategy.option_d_custom
         }
         
         if option.upper() not in strategies:
