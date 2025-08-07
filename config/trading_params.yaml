@@ -37,7 +37,7 @@ trading_params:
   # ATR Trailing Stop System
   trailing_stops:
     enabled: true
-    strategy: 'C' # Options: A (Pure), B (Time-based), C (Aggressive)
+    strategy: 'D' # Options: A (Pure), B (Time-based), C (Aggressive), D (Custom)
     allow_runtime_changes: true
     config_check_interval: 6000 # Check for config changes every N seconds
 
@@ -46,3 +46,4 @@ trading_params:
     # A: Breakeven@1.5 ATR, Trail@1.0 ATR, Hard Stop@2.0 ATR (Conservative)
     # B: Breakeven@2.0 ATR, Trail@1.5 ATR, Hard Stop@2.5 ATR (Balanced)
     # C: Breakeven@1.0 ATR, Trail@0.75 ATR, Hard Stop@1.5 ATR (Aggressive)
+    # D: Breakeven@1.0 ATR, Trail@1.5  ATR, Hard Stop@2.0 ATR (Custom)
