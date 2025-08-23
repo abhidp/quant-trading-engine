@@ -1,7 +1,20 @@
 trading_params:
   instrument: 'XAUUSDx'
   timeframe: 'M1'
-  lot_size: 0.50
+  
+  # Position Sizing Configuration
+  use_dynamic_sizing: true      # Enable dynamic position sizing based on account balance
+  risk_percent: 1.0            # Risk percentage per trade (1% of account balance)
+  min_position_size: 0.01      # Minimum position size in lots
+  max_position_size_percent: 5.0  # Maximum position size as % of account balance (prevents over-leverage)
+  max_position_size_absolute: null  # Absolute max in lots (null = no hard limit)
+  lot_size: 0.50               # Fixed lot size (used when dynamic sizing is disabled)
+  
+  # Portfolio Risk Management
+  max_total_risk_percent: 5.0  # Maximum total risk exposure across all open positions (% of account balance)
+  max_single_position_risk_percent: 1.5  # Maximum risk per individual position (% of account balance)
+  portfolio_risk_enabled: true # Enable portfolio-level risk management
+  
   contract_size: 100000
   starting_balance: 10000
 

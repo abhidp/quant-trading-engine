@@ -2,6 +2,7 @@
 Core risk management module for trading strategy.
 Contains position sizing and stop loss calculation logic.
 """
+import MetaTrader5 as mt5
 
 
 class RiskManager:
@@ -148,3 +149,65 @@ class RiskManager:
             return False
             
         return True
+    
+    def calculate_dynamic_position_size(self, symbol, entry_price, stop_loss, risk_percent=1.0, min_size=0.01, max_size=0.1):
+        """
+        Calculate position size based on account balance and risk percentage
+        
+        Args:
+            symbol (str): Trading symbol
+            entry_price (float): Entry price
+            stop_loss (float): Stop loss price
+            risk_percent (float): Risk percentage of account balance (default: 1.0%)
+            min_size (float): Minimum position size (default: 0.01)
+            max_size (float): Maximum position size (default: 0.1)
+            
+        Returns:
+            float: Calculated position size in lots
+        """
+        # Get account balance
+        account_info = mt5.account_info()
+        if account_info is None:
+            return min_size
+        
+        balance = account_info.balance
+        risk_amount = balance * (risk_percent / 100.0)
+        
+        # Get symbol info
+        symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            return min_size
+        
+        # Calculate stop distance in price units
+        stop_distance = abs(entry_price - stop_loss)
+        
+        # Get pip value based on symbol type
+        pip_value = self._get_pip_value(symbol, symbol_info)
+        
+        # Convert stop distance to pips
+        stop_distance_pips = stop_distance / pip_value
+        
+        # Calculate position size
+        contract_size = symbol_info.trade_contract_size
+        
+        if stop_distance_pips > 0:
+            position_size = risk_amount / (stop_distance_pips * pip_value * contract_size)
+        else:
+            return min_size
+        
+        # Apply constraints
+        position_size = max(min_size, min(position_size, max_size))
+        
+        # Round to appropriate precision
+        position_size = round(position_size, 2)
+        
+        return position_size
+    
+    def _get_pip_value(self, symbol, symbol_info):
+        """Get pip value for different symbol types"""
+        if 'JPY' in symbol:
+            return 0.01
+        elif 'XAU' in symbol or 'GOLD' in symbol.upper():
+            return 0.01  # Gold trades in 0.01 increments
+        else:
+            return 0.0001  # Standard forex

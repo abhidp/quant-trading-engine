@@ -127,6 +127,231 @@ def get_current_positions(symbol):
         return []
     return list(positions)
 
+def get_account_balance():
+    """Get current account balance from MT5"""
+    account_info = mt5.account_info()
+    if account_info is None:
+        logger.error("Failed to get account info")
+        return None
+    return account_info.balance
+
+def get_pip_value(symbol):
+    """Calculate pip value for position sizing"""
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info is None:
+        logger.error(f"Could not get symbol info for {symbol}")
+        return None
+    
+    # For most forex pairs, pip is 0.0001 (4th decimal)
+    # For JPY pairs, pip is 0.01 (2nd decimal)
+    # For gold (XAU), pip is typically 0.01 (2nd decimal)
+    point = symbol_info.point
+    
+    if 'JPY' in symbol:
+        pip_value = 0.01
+    elif 'XAU' in symbol or 'GOLD' in symbol.upper():
+        pip_value = 0.01  # Gold trades in 0.01 increments
+    else:
+        pip_value = 0.0001  # Standard forex
+    
+    return pip_value
+
+def calculate_dynamic_position_size(symbol, entry_price, stop_loss, risk_percent=1.0, 
+                                   min_size=0.01, max_size_percent=5.0, max_size_absolute=None,
+                                   max_single_position_risk_percent=1.5):
+    """
+    Calculate position size based on account balance and risk percentage with proper compounding
+    
+    Args:
+        symbol (str): Trading symbol
+        entry_price (float): Entry price
+        stop_loss (float): Stop loss price
+        risk_percent (float): Risk percentage of account balance (default: 1.0%)
+        min_size (float): Minimum position size (default: 0.01)
+        max_size_percent (float): Maximum position size as % of balance (default: 5.0%)
+        max_size_absolute (float, optional): Absolute maximum in lots (None = no hard limit)
+        max_single_position_risk_percent (float): Maximum risk per single position (default: 1.5%)
+        
+    Returns:
+        float: Calculated position size in lots
+    """
+    # Get account balance
+    balance = get_account_balance()
+    if balance is None:
+        logger.error("Could not get account balance, using minimum position size")
+        return min_size
+    
+    # Apply per-position risk cap (prevent single position from using entire portfolio allowance)
+    effective_risk_percent = min(risk_percent, max_single_position_risk_percent)
+    
+    # Calculate risk amount using the capped risk percentage
+    risk_amount = balance * (effective_risk_percent / 100.0)
+    
+    # Log if risk was capped
+    if effective_risk_percent != risk_percent:
+        logger.info(f"Position risk capped: {risk_percent:.1f}% -> {effective_risk_percent:.1f}% (per-position limit)")
+    
+    original_risk_amount = balance * (risk_percent / 100.0)
+    
+    # Get symbol info for contract size
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info is None:
+        logger.error(f"Could not get symbol info for {symbol}, using minimum position size")
+        return min_size
+    
+    # Calculate stop distance in price units
+    stop_distance = abs(entry_price - stop_loss)
+    
+    # Get pip value
+    pip_value = get_pip_value(symbol)
+    if pip_value is None:
+        logger.error(f"Could not get pip value for {symbol}, using minimum position size")
+        return min_size
+    
+    # Convert stop distance to pips
+    stop_distance_pips = stop_distance / pip_value
+    
+    # Calculate position size based on risk
+    contract_size = symbol_info.trade_contract_size
+    
+    if stop_distance_pips > 0:
+        position_size = risk_amount / (stop_distance_pips * pip_value * contract_size)
+    else:
+        logger.warning("Stop distance is zero, using minimum position size")
+        return min_size
+    
+    # Calculate dynamic maximum based on account balance percentage
+    dynamic_max_size = (balance * max_size_percent / 100.0) / (symbol_info.trade_contract_size * pip_value * 100)
+    
+    # Apply constraints
+    position_size = max(min_size, position_size)
+    
+    # Apply percentage-based max (scales with account)
+    position_size = min(position_size, dynamic_max_size)
+    
+    # Apply absolute max only if specified
+    if max_size_absolute is not None:
+        position_size = min(position_size, max_size_absolute)
+        if position_size == max_size_absolute:
+            logger.warning(f"Position size capped at absolute maximum: {max_size_absolute} lots")
+    
+    # Round to appropriate precision (0.01 lots)
+    position_size = round(position_size, 2)
+    
+    logger.info(f"Position sizing: Balance=${balance:.2f}, Risk=${risk_amount:.2f}, "
+                f"Stop={stop_distance_pips:.1f}pips, Size={position_size:.2f}lots, "
+                f"DynamicMax={dynamic_max_size:.2f}lots")
+    
+    return position_size
+
+def calculate_current_portfolio_risk():
+    """
+    Calculate current total risk exposure across all open positions
+    Based on realized account balance, not equity
+    
+    Returns:
+        tuple: (current_risk_amount, current_risk_percent, position_details)
+    """
+    # Get account balance (realized, not equity)
+    balance = get_account_balance()
+    if balance is None:
+        logger.error("Could not get account balance for portfolio risk calculation")
+        return 0.0, 0.0, []
+    
+    # Get all open positions
+    positions = mt5.positions_get()
+    if positions is None:
+        return 0.0, 0.0, []
+    
+    total_risk_amount = 0.0
+    position_details = []
+    
+    for pos in positions:
+        # Skip positions not managed by this bot (different magic number)
+        if pos.magic != 12345:
+            continue
+            
+        # Calculate risk for this position
+        entry_price = pos.price_open
+        current_stop = pos.sl if pos.sl > 0 else None
+        volume = pos.volume
+        symbol = pos.symbol
+        
+        if current_stop is not None:
+            # Calculate stop distance
+            stop_distance = abs(entry_price - current_stop)
+            
+            # Get symbol info for contract size
+            symbol_info = mt5.symbol_info(symbol)
+            if symbol_info is not None:
+                contract_size = symbol_info.trade_contract_size
+                pip_value = get_pip_value(symbol)
+                
+                if pip_value is not None:
+                    # Calculate risk amount for this position
+                    stop_distance_pips = stop_distance / pip_value
+                    position_risk = stop_distance_pips * pip_value * contract_size * volume
+                    
+                    total_risk_amount += position_risk
+                    
+                    position_details.append({
+                        'symbol': symbol,
+                        'ticket': pos.ticket,
+                        'volume': volume,
+                        'risk_amount': position_risk,
+                        'stop_distance_pips': stop_distance_pips
+                    })
+    
+    # Calculate risk percentage
+    current_risk_percent = (total_risk_amount / balance) * 100.0 if balance > 0 else 0.0
+    
+    return total_risk_amount, current_risk_percent, position_details
+
+def can_open_new_position(symbol, entry_price, stop_loss, position_size, max_total_risk_percent):
+    """
+    Check if opening a new position would exceed portfolio risk limits
+    
+    Args:
+        symbol (str): Trading symbol
+        entry_price (float): Proposed entry price
+        stop_loss (float): Proposed stop loss
+        position_size (float): Proposed position size in lots
+        max_total_risk_percent (float): Maximum total portfolio risk percentage
+        
+    Returns:
+        tuple: (can_open, current_risk_percent, new_position_risk_percent, reason)
+    """
+    # Get current portfolio risk
+    current_risk_amount, current_risk_percent, position_details = calculate_current_portfolio_risk()
+    
+    # Calculate risk for the new proposed position
+    balance = get_account_balance()
+    if balance is None:
+        return False, 0.0, 0.0, "Could not get account balance"
+    
+    # Calculate new position risk
+    stop_distance = abs(entry_price - stop_loss)
+    pip_value = get_pip_value(symbol)
+    symbol_info = mt5.symbol_info(symbol)
+    
+    if pip_value is None or symbol_info is None:
+        return False, current_risk_percent, 0.0, "Could not get symbol information"
+    
+    contract_size = symbol_info.trade_contract_size
+    stop_distance_pips = stop_distance / pip_value
+    new_position_risk = stop_distance_pips * pip_value * contract_size * position_size
+    new_position_risk_percent = (new_position_risk / balance) * 100.0
+    
+    # Calculate total risk if this position is opened
+    total_risk_after = current_risk_percent + new_position_risk_percent
+    
+    # Check if it would exceed the limit
+    if total_risk_after > max_total_risk_percent:
+        reason = f"Portfolio risk limit exceeded: {total_risk_after:.2f}% > {max_total_risk_percent:.2f}%"
+        return False, current_risk_percent, new_position_risk_percent, reason
+    
+    return True, current_risk_percent, new_position_risk_percent, "Within risk limits"
+
 def validate_stop_distance(symbol, current_price, stop_loss, order_type):
     """Validate stop loss distance meets broker requirements"""
     try:
@@ -549,7 +774,19 @@ def live_trading_loop():
     rsi_oversold = params['rsi_oversold']
     rsi_overbought = params['rsi_overbought']
     rsi_exit_level = params['rsi_exit_level']
-    lot_size = params['lot_size']
+    # Position sizing parameters
+    use_dynamic_sizing = params.get('use_dynamic_sizing', True)
+    fixed_lot_size = params.get('lot_size', 0.01)  # Fallback for dynamic sizing
+    risk_percent = params.get('risk_percent', 1.0)
+    min_position_size = params.get('min_position_size', 0.01)
+    max_position_size_percent = params.get('max_position_size_percent', 5.0)
+    max_position_size_absolute = params.get('max_position_size_absolute')
+    
+    # Portfolio risk management parameters
+    portfolio_risk_enabled = params.get('portfolio_risk_enabled', True)
+    max_total_risk_percent = params.get('max_total_risk_percent', 5.0)
+    max_single_position_risk_percent = params.get('max_single_position_risk_percent', 1.5)
+    
     atr_period = params.get('atr_period', 14)
     atr_multiplier = params.get('atr_multiplier', 2.0)
     use_atr_stop = params.get('use_atr_stop', True)
@@ -584,7 +821,20 @@ def live_trading_loop():
     logger.info(f"Trading parameters loaded:")
     logger.info(f"Symbol: {symbol}, Timeframe: {params['timeframe']}")
     logger.info(f"RSI: {rsi_period} period, Entry: {rsi_oversold}/{rsi_overbought}, Exit: {rsi_exit_level}")
-    logger.info(f"Position size: {lot_size} lots")
+    if use_dynamic_sizing:
+        max_desc = f"{max_position_size_percent}% of balance"
+        if max_position_size_absolute:
+            max_desc += f" (capped at {max_position_size_absolute} lots)"
+        logger.info(f"Position sizing: DYNAMIC - {risk_percent}% risk, Min: {min_position_size}, Max: {max_desc}")
+    else:
+        logger.info(f"Position sizing: FIXED - {fixed_lot_size} lots")
+    
+    if portfolio_risk_enabled:
+        logger.info(f"Portfolio Risk Management: ENABLED")
+        logger.info(f"   Max total exposure: {max_total_risk_percent}%")
+        logger.info(f"   Max per-position risk: {max_single_position_risk_percent}%")
+    else:
+        logger.info(f"Portfolio Risk Management: DISABLED")
     
     if use_trend_filter:
         logger.info(f"Trend Filter: ENABLED - EMA({trend_fast_ema}, {trend_medium_ema}, {trend_slow_ema})")
@@ -841,12 +1091,36 @@ def live_trading_loop():
                         )
                         logger.info(f"{symbol} Legacy ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
                     
-                    result = place_buy_order(symbol, lot_size, stop_loss)
+                    # Calculate position size
+                    if use_dynamic_sizing and stop_loss is not None:
+                        position_size = calculate_dynamic_position_size(
+                            symbol, current_price, stop_loss, risk_percent, 
+                            min_position_size, max_position_size_percent, max_position_size_absolute,
+                            max_single_position_risk_percent
+                        )
+                    else:
+                        position_size = fixed_lot_size
+                    
+                    # Check portfolio risk limits before opening position
+                    if portfolio_risk_enabled and stop_loss is not None:
+                        can_open, current_risk, new_risk, risk_reason = can_open_new_position(
+                            symbol, current_price, stop_loss, position_size, max_total_risk_percent
+                        )
+                        
+                        if not can_open:
+                            logger.warning(f"{symbol} BUY ORDER BLOCKED: {risk_reason}")
+                            logger.info(f"   Current portfolio risk: {current_risk:.2f}%")
+                            logger.info(f"   New position would add: {new_risk:.2f}%")
+                            continue
+                        else:
+                            logger.info(f"{symbol} Portfolio risk check passed: {current_risk:.2f}% + {new_risk:.2f}% = {current_risk + new_risk:.2f}% (limit: {max_total_risk_percent}%)")
+                    
+                    result = place_buy_order(symbol, position_size, stop_loss)
                     if result:
                         logger.info(f"{symbol} BUY POSITION OPENED:")
                         logger.info(f"   Entry Price: {current_price:.5f}")
                         logger.info(f"   Initial Stop: {stop_loss:.5f}" if stop_loss else "   No Stop Loss")
-                        logger.info(f"   Position Size: {lot_size} lots")
+                        logger.info(f"   Position Size: {position_size:.2f} lots")
                         logger.info(f"   Strategy: MinimalFilter RSI + ATR Trailing Stops")
                 
                 elif should_sell and not has_any_position:
@@ -869,12 +1143,36 @@ def live_trading_loop():
                         )
                         logger.info(f"{symbol} Legacy ATR Stop Loss: {stop_loss:.5f} (ATR: {current_atr:.5f})")
                     
-                    result = place_sell_order(symbol, lot_size, stop_loss)
+                    # Calculate position size
+                    if use_dynamic_sizing and stop_loss is not None:
+                        position_size = calculate_dynamic_position_size(
+                            symbol, current_price, stop_loss, risk_percent, 
+                            min_position_size, max_position_size_percent, max_position_size_absolute,
+                            max_single_position_risk_percent
+                        )
+                    else:
+                        position_size = fixed_lot_size
+                    
+                    # Check portfolio risk limits before opening position
+                    if portfolio_risk_enabled and stop_loss is not None:
+                        can_open, current_risk, new_risk, risk_reason = can_open_new_position(
+                            symbol, current_price, stop_loss, position_size, max_total_risk_percent
+                        )
+                        
+                        if not can_open:
+                            logger.warning(f"{symbol} SELL ORDER BLOCKED: {risk_reason}")
+                            logger.info(f"   Current portfolio risk: {current_risk:.2f}%")
+                            logger.info(f"   New position would add: {new_risk:.2f}%")
+                            continue
+                        else:
+                            logger.info(f"{symbol} Portfolio risk check passed: {current_risk:.2f}% + {new_risk:.2f}% = {current_risk + new_risk:.2f}% (limit: {max_total_risk_percent}%)")
+                    
+                    result = place_sell_order(symbol, position_size, stop_loss)
                     if result:
                         logger.info(f"{symbol} SELL POSITION OPENED:")
                         logger.info(f"   Entry Price: {current_price:.5f}")
                         logger.info(f"   Initial Stop: {stop_loss:.5f}" if stop_loss else "   No Stop Loss")
-                        logger.info(f"   Position Size: {lot_size} lots")
+                        logger.info(f"   Position Size: {position_size:.2f} lots")
                         logger.info(f"   Strategy: MinimalFilter RSI + ATR Trailing Stops")
                 
                 # Exit signals - ONLY use RSI exits when trailing stops are DISABLED
