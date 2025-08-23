@@ -40,11 +40,17 @@ class RSICalculator(OscillatorBase):
         if (avg_gain == 0).all() and (avg_loss == 0).all():
             return pd.Series([50] * len(prices), index=prices.index)
         
-        # Handle division by zero
-        avg_loss = avg_loss.replace(0, 0.0001)
-        
+        # Calculate the relative strength. Let pandas handle division by zero
+        # which will yield ``inf`` when there are no losses. An infinite RS
+        # correctly results in an RSI value of 100. When both average gain and
+        # average loss are zero (flat prices), the earlier check returns a
+        # neutral series so we only need to handle potential NaNs here.
         rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
+
+        # Replace NaN values that could appear from 0/0 divisions with the
+        # neutral RSI value of 50.
+        rsi = rsi.fillna(50)
         
         # Reindex to match original prices series length
         rsi_full = pd.Series(index=prices.index, dtype=float)

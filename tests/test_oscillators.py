@@ -42,6 +42,14 @@ def test_rsi_all_gains():
     assert len(result) == len(prices)
     assert all(x > 70 for x in result.dropna().iloc[5:])  # Should indicate overbought
 
+
+def test_rsi_all_gains_reaches_hundred():
+    """RSI should reach 100 when there are no losses"""
+    rsi = RSICalculator(period=5)
+    prices = pd.Series(range(10, 30, 2))  # Strictly increasing
+    result = rsi.calculate(prices)
+    assert (result.dropna().iloc[5:] == 100).all()
+
 def test_rsi_all_losses():
     """Test RSI with only decreasing prices"""
     rsi = RSICalculator(period=5)
