@@ -71,6 +71,7 @@ class TrailingStopManager:
                 position['breakeven_triggered'] = True
                 reason = f"BREAKEVEN: Profit > {self.breakeven_trigger} ATR"
                 self._log_stop_adjustment(position, new_stop, reason)
+                position['stop_loss'] = new_stop
                 return new_stop, reason
         
         # Stage 2: Trailing stop if in profit and breakeven triggered
@@ -81,6 +82,7 @@ class TrailingStopManager:
             if self._is_better_stop(position, new_stop):
                 reason = f"TRAILING: {self.trail_distance} ATR from peak"
                 self._log_stop_adjustment(position, new_stop, reason)
+                position['stop_loss'] = new_stop
                 return new_stop, reason
         
         # Stage 3: Keep current stop (hard stop or existing trailing stop)
