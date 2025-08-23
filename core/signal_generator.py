@@ -394,10 +394,11 @@ class MinimalFilterRSIEntry:
             
         # Momentum conditions
         was_oversold = previous_rsi < self.rsi_oversold
+        currently_oversold = current_rsi < self.rsi_oversold  # Must still be in oversold zone
         meaningful_recovery = current_rsi > previous_rsi + self.momentum_threshold
         avoid_falling_knife = current_rsi > 15  # Avoid extreme scenarios
         
-        return was_oversold and meaningful_recovery and avoid_falling_knife
+        return was_oversold and currently_oversold and meaningful_recovery and avoid_falling_knife
     
     def should_enter_sell(self, current_rsi, previous_rsi=None):
         """
@@ -430,10 +431,11 @@ class MinimalFilterRSIEntry:
             
         # Momentum conditions
         was_overbought = previous_rsi > self.rsi_overbought
+        currently_overbought = current_rsi > self.rsi_overbought  # Must still be in overbought zone
         meaningful_decline = current_rsi < previous_rsi - self.momentum_threshold
         avoid_rising_dagger = current_rsi < 85  # Avoid extreme scenarios
         
-        return was_overbought and meaningful_decline and avoid_rising_dagger
+        return was_overbought and currently_overbought and meaningful_decline and avoid_rising_dagger
     
     def should_exit_buy(self, current_rsi):
         """
