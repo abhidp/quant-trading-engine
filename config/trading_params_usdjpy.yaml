@@ -1,15 +1,15 @@
 trading_params:
-  instrument: 'EURUSD'
+  instrument: 'USDJPY'
   timeframe: 'M5'
-  magic_number: 100001                     # Unique identifier for this trading instance
+  magic_number: 100002                     # Unique identifier for USDJPY M15 instance
   
   # Position Sizing Configuration
   use_dynamic_sizing: true              # Enable dynamic position sizing based on account balance
-  default_risk_per_trade: 1.0          # Normal risk per trade (% of account balance)
+  default_risk_per_trade: 1          # Higher risk for this pair (% of account balance)
   min_position_size: 0.01              # Minimum position size in lots
   max_position_size_percent: 5.0       # Max position as % of balance (scales with account)
   max_position_size_absolute: null     # Optional hard cap (null = unlimited compounding)
-  lot_size: 0.50                       # Fixed lot size (used when dynamic sizing is disabled)
+  lot_size: 0.30                       # Fixed lot size (used when dynamic sizing is disabled)
   
   # Portfolio Risk Management (Three-Layer Protection)
   max_risk_per_trade: 1.5              # Never exceed this per individual trade (% of account balance)
@@ -26,22 +26,22 @@ trading_params:
   # Cache settings
   use_cache: true
   cache_dir: 'data/cache'
-  rsi_period: 14
-  rsi_oversold: 35
-  rsi_overbought: 65
+  rsi_period: 20                       # Longer RSI period for 15min timeframe
+  rsi_oversold: 30                     # Slightly different levels
+  rsi_overbought: 70
   rsi_exit_level: 50
 
   # RSI Momentum Filtering
-  rsi_momentum_threshold: 2.0 # Minimum RSI points change required for entry signal
+  rsi_momentum_threshold: 3.0 # Higher threshold for longer timeframe
   use_momentum_filter: true # Enable/disable momentum confirmation
 
   # Trend Filter (prevents counter-trend trades)
   trend_filter:
-    enabled: false # Enable/disable trend filtering
+    enabled: true # Enable trend filtering for JPY pairs
     fast_ema: 12 # Fast EMA
     medium_ema: 26 # Medium EMA
     slow_ema: 50 # Slow EMA
-    strength_threshold: 0.002 # Minimum strength for strong trend (0.2%)
+    strength_threshold: 0.003 # Stronger trend requirement for JPY (0.3%)
 
   # ATR Stop Loss parameters (Legacy - for reference)
   use_atr_stop: false # Disabled in favor of trailing stops
@@ -51,10 +51,9 @@ trading_params:
   # ATR Trailing Stop System
   trailing_stops:
     enabled: true
-    strategy: 'D' # Options: A (Pure), B (Time-based), C (Aggressive), D (Custom)
+    strategy: 'B' # Balanced strategy for JPY pairs
     allow_runtime_changes: true
     config_check_interval: 6000 # Check for config changes every N seconds
-
 
     # Strategy Descriptions:
     # A: Breakeven@1.5 ATR, Trail@1.0 ATR, Hard Stop@2.0 ATR (Conservative)

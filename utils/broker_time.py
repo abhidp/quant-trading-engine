@@ -112,7 +112,7 @@ def get_broker_time_string():
     return broker_time.strftime('%Y-%m-%d %H:%M:%S')
 
 
-def setup_broker_time_logging(log_level=logging.INFO):
+def setup_broker_time_logging(log_level=logging.INFO, log_file=None):
     """Setup logging with broker time formatting"""
     # Create broker time formatter
     formatter = BrokerTimeFormatter(
@@ -134,8 +134,14 @@ def setup_broker_time_logging(log_level=logging.INFO):
     logger.addHandler(console_handler)
     
     # Add file handler with broker time
-    from datetime import datetime
-    log_filename = f'logs/live_rsi_trader_{datetime.now().strftime("%Y%m%d")}.log'
+    if log_file:
+        # Use provided log file path
+        log_filename = log_file
+    else:
+        # Default log file naming
+        from datetime import datetime
+        log_filename = f'logs/live_rsi_trader_{datetime.now().strftime("%Y%m%d")}.log'
+    
     file_handler = logging.FileHandler(log_filename)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)

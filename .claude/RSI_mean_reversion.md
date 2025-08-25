@@ -1,253 +1,218 @@
-## **RSI Mean Reversion Strategy Automation for MetaTrader5 (Python)**
+● RSI Momentum Trading Strategy with ATR Trailing Stops
 
-## 🎯 **RSI Mean Reversion Strategy Automation for MetaTrader5 (Python)**
+Strategy Overview
 
-Create a **production-ready, fault-tolerant** RSI Mean Reversion strategy automation system for MetaTrader 5. Focus on **reliability, performance monitoring, and real-world trading conditions**.
+This is a professional mean-reversion trading strategy built around RSI (Relative Strength Index) signals enhanced with
+momentum confirmation and sophisticated ATR-based trailing stop management. The strategy operates on EURUSD using
+M1 timeframe.
 
----
+Core Parameters (from trading_params.yaml)
 
-### 📊 **ENHANCED STRATEGY LOGIC**
+Basic Configuration
 
-**Core Setup:**
+- Instrument: EURUSD
+- Timeframe: M5
+- Position Size: Dynamic - 1% of account balance per trade
+- Contract Size: 100,000
 
-- **Timeframe**: 1-minute charts
-- **Markets**: EURUSD, GBPUSD, USDJPY, US30, NAS100
-- **Trading Hours**: Respect market sessions (avoid low liquidity periods: 22:00-01:00 GMT)
+RSI Settings
 
-#### 📥 **Entry Conditions** (All must be true):
+- RSI Period: 14
+- Oversold Level: 25 (BUY signal threshold)
+- Overbought Level: 75 (SELL signal threshold)
+- Exit Level: 50 (neutral zone for exits)
 
-- **BUY**: RSI(14) crosses below 30 AND previous RSI was ≥ 30
-- **SELL**: RSI(14) crosses above 70 AND previous RSI was ≤ 70
-- **Volume Filter**: Current volume > 1.2x rolling 20-period average
-- **Spread Filter**: Current spread ≤ 1.5x average spread (last 100 ticks)
-- **Volatility Filter**: ATR(14) > 0.3x average ATR (prevents dead market trading)
-- **Cooldown**: 15-minute minimum between trades on same symbol
-- **Max Daily Trades**: 10 trades per symbol per day
+Momentum Filter
 
-#### 📤 **Exit Conditions** (First triggered wins):
+- Momentum Threshold: 2.0 RSI points
+- Use Momentum Filter: Enabled
+- Prevents "falling knife" entries by requiring meaningful RSI recovery
 
-1. **Take Profit**: Price touches middle Bollinger Band (20, 2.0)
-2. **Momentum Exit**: RSI crosses back through 50 line
-3. **Time Exit**: Close after 2 hours if no other exit triggered
-4. **Stop Loss**: 2.0x ATR(14) from entry (accounts for 1-min volatility)
+Trend Filter (Currently Disabled)
 
----
+- Fast EMA: 12
+- Medium EMA: 26
+- Slow EMA: 50
+- Strength Threshold: 0.002 (0.2%)
+- When enabled, prevents counter-trend trades
 
-### 🏗️ **SYSTEM ARCHITECTURE**
+Entry Conditions
 
-#### 1. `connection_manager.py`
+Signal Generation System
 
-```python
-# Enhanced MT5 connection with health monitoring
-- Auto-reconnection with exponential backoff (max 5 attempts)
-- Connection health checks every 30 seconds
-- Fallback data source preparation
-- Terminal restart detection and recovery
-```
+The strategy uses MinimalFilterRSIEntry class (live_rsi_trader.py:758-822) which provides two types of signals:
 
-#### 2. `data_pipeline.py`
+BUY Signals
 
-```python
-# Robust data handling with validation
-- Real-time tick and bar data synchronization
-- Data quality checks (gap detection, spike filtering)
-- Buffered data storage (last 1000 bars in memory)
-- Automatic data refresh on connection recovery
-- Symbol-specific spread tracking
-```
+1. Momentum-Filtered (default):
 
-#### 3. `technical_indicators.py`
+   - Previous RSI was below 25 (oversold)
+   - Current RSI shows recovery: current_rsi > previous_rsi + 2.0
+   - Avoid extreme conditions: current_rsi > 15
 
-```python
-# Optimized indicator calculations
-- Vectorized pandas operations
-- Incremental updates (not full recalculation)
-- NaN handling for cold starts
-- Performance profiling for bottlenecks
-```
+2. Basic RSI (fallback):
 
-#### 4. `smart_signal_engine.py`
+   - Simple condition: current_rsi < 25
 
-```python
-# Advanced signal generation with filters
-- Signal strength scoring (0-100)
-- False signal detection (rapid RSI reversals)
-- Market regime awareness (trending vs ranging)
-- Signal persistence validation (hold signal for 2-3 bars)
-```
+SELL Signals
 
-#### 5. `adaptive_risk_manager.py`
+1. Momentum-Filtered (default):
 
-```python
-# Dynamic risk management
-- Volatility-adjusted position sizing
-- Correlation-based exposure limits
-- Drawdown-triggered position reduction
-- Time-of-day risk scaling
-- Account equity curve monitoring
-```
+   - Previous RSI was above 75 (overbought)
+   - Current RSI shows decline: current_rsi < previous_rsi - 2.0
+   - Avoid extreme conditions: current_rsi < 85
 
-#### 6. `execution_engine.py`
+2. Basic RSI (fallback):
 
-```python
-# Professional order management
-- Market microstructure analysis
-- Slippage estimation and tracking
-- Partial fill handling
-- Order rejection recovery
-- Latency monitoring and alerts
-```
+   - Simple condition: current_rsi > 75
 
-#### 7. `performance_monitor.py`
+Trend Filter Application
 
-```python
-# Real-time performance tracking
-- Live Sharpe ratio calculation
-- Rolling win rate (last 20 trades)
-- Maximum adverse excursion tracking
-- Strategy heat mapping by time/symbol
-- Automatic strategy pause on poor performance
-```
+When trend filtering is enabled, signals are further validated:
 
----
+- BUY allowed when: Fast EMA > Medium EMA > Slow EMA and price > Fast EMA
+- SELL allowed when: Fast EMA < Medium EMA < Slow EMA and price < Fast EMA
+- Strong trends (>0.2% separation) block counter-trend trades entirely
 
-### 🛡️ **ENHANCED RISK CONTROLS**
+Exit Strategy System
 
-#### **Account Protection:**
+ATR Trailing Stop System (Primary - Currently Active)
 
-- **Position Size**: 0.5% risk per trade (conservative for 1-min scalping)
-- **Daily Loss Limit**: 2% of account balance
-- **Maximum Drawdown Trigger**: Pause trading if drawdown > 5%
-- **Correlation Limit**: Max 2 positions in correlated pairs (correlation > 0.7)
+The strategy uses Strategy 'D' from TrailingStopManager with a three-stage approach:
 
-#### **Technical Safeguards:**
+Stage 1: Hard Stop Loss
 
-- **Circuit Breaker**: Auto-stop after 3 consecutive losses > 1% each
-- **Spread Protection**: Skip trades if spread widens > 3x normal
-- **Gap Protection**: No trading for 5 minutes after price gaps > 2x ATR
-- **Weekend Gap**: Close all positions 30 minutes before market close Friday
+- Initial Distance: 2.0 × ATR below entry (BUY) or above entry (SELL)
+- Applied immediately on position entry
+- Acts as safety net throughout trade lifecycle
 
----
+Stage 2: Breakeven Move
 
-### 📈 **ADVANCED BACKTESTING FRAMEWORK**
+- Trigger: When profit reaches 1.0 × ATR
+- Action: Move stop to entry + small spread buffer (0.1 × ATR)
+- Protects against losses once minimum profit is achieved
 
-#### `advanced_backtester.ipynb`
+Stage 3: Trailing Stop
 
-```python
-# Comprehensive historical testing
-- Walk-forward optimization (6-month train, 1-month test)
-- Monte Carlo simulation (1000 runs with randomized entry timing)
-- Market regime analysis (bull/bear/sideways performance)
-- Slippage modeling based on spread percentiles
-- Commission impact analysis
-- Out-of-sample validation
-```
+- Distance: 1.5 × ATR from peak price (BUY) or trough price (SELL)
+- Activation: After breakeven is triggered and position remains profitable
+- Logic: Stop only moves in favorable direction (up for BUY, down for SELL)
 
-#### **Performance Metrics:**
+Strategy Options Available:
 
-- Calmar Ratio, Sortino Ratio, Maximum Adverse Excursion
-- Trade duration analysis
-- Profit factor by time of day
-- Win rate by RSI entry level (25-30 vs 20-25 for oversold)
+- A (Pure): Breakeven@1.5 ATR, Trail@1.0 ATR, Hard Stop@2.0 ATR
+- B (Time-based): Breakeven@2.0 ATR, Trail@1.5 ATR, Hard Stop@2.5 ATR
+- C (Aggressive): Breakeven@1.0 ATR, Trail@0.75 ATR, Hard Stop@1.5 ATR
+- D (Custom): Breakeven@1.0 ATR, Trail@1.5 ATR, Hard Stop@2.0 ATR ✓ Currently Active
 
----
+RSI Exit System (Secondary - Disabled when trailing stops active)
 
-### 🔧 **PRODUCTION FEATURES**
+- BUY Exit: When RSI rises above 50
+- SELL Exit: When RSI falls below 50
+- Only used when trailing_stops.enabled = false
 
-#### `system_monitor.py`
+Risk Management
 
-```python
-# System health monitoring
-- CPU/Memory usage tracking
-- MT5 terminal responsiveness tests
-- Internet connectivity validation
-- Disk space monitoring (for logs)
-- Automatic system restart on critical failures
-```
+Position Sizing
 
-#### `alert_system.py`
+Dynamic position sizing based on account balance and risk percentage:
 
-```python
-# Multi-channel alerting
-- Email alerts (SMTP with TLS)
-- Telegram bot integration
-- SMS alerts for critical failures (Twilio API)
-- Desktop notifications
-- Alert rate limiting (max 10/hour)
-```
+- logic maintained in risk_manager.py
 
-#### `data_recorder.py`
+Stop Loss Validation
 
-```python
-# Comprehensive logging system
-- Trade logs with full context (market conditions, signal strength)
-- Performance logs (every 15 minutes)
-- Error logs with stack traces
-- System health logs
-- Log rotation and compression
-- Database storage option (SQLite)
-```
+- Checks minimum broker distance requirements (live_rsi_trader.py:130-166)
+- Auto-adjusts stops that are too close to current price
+- Uses appropriate price feeds (bid for BUY positions, ask for SELL positions)
 
----
+Technical Implementation
 
-### 📱 **MONITORING DASHBOARD**
+Indicator Calculations
 
-#### `dashboard.py` (Streamlit)
+- RSI: Uses MT5-standard EMA method with Wilder's smoothing (alpha = 1/period)
+- ATR: Exponential moving average of True Range over 14 periods
+- EMAs: Exponential moving averages for trend filtering
 
-```python
-# Real-time trading dashboard
-- Live P&L chart with benchmark comparison
-- Current positions with unrealized P&L
-- Recent signals with entry reasoning
-- System health indicators
-- Performance statistics (updated every minute)
-- Manual override controls (pause/resume)
-```
+Position Tracking
 
----
+- Each position gets unique tracking record with entry price, timestamps, volume
+- Real-time updates of highest/lowest prices for trailing calculations
+- Comprehensive logging of all stop adjustments with reasons
+- Automatic cleanup when positions are closed
 
-### ⚡ **PERFORMANCE OPTIMIZATIONS**
+Safety Features
 
-```python
-# Code efficiency requirements
-- Use numpy for calculations where possible
-- Implement data caching for repeated lookups
-- Optimize pandas operations (avoid loops)
-- Parallel processing for multiple symbols
-- Memory usage monitoring
-- Async operations for non-blocking execution
-```
+- Duplicate Prevention: Multiple checks to prevent opening multiple positions
+- Data Validation: OHLC data validation before processing
+- Error Handling: Comprehensive exception handling with fallback behaviors
+- Hot Reload: Configuration changes applied without restart (6000-second intervals)
 
----
+The strategy is designed for professional automated trading with robust risk management and detailed performance tracking  
+ capabilities.
 
-### 📦 **DELIVERABLES WITH TESTING**
+● Here's the directory structure showing the relevant
+strategy and core files:
 
-1. **Production System** (`main.py` + modules)
-2. **Testing Suite** (`pytest` unit tests for each module)
-3. **Deployment Guide** (Docker containerization optional)
-4. **Configuration Templates** (Live vs Demo vs Backtest configs)
-5. **Performance Benchmarks** (Expected metrics on demo data)
-6. **Troubleshooting Playbook** (Common issues and solutions)
+quant-trading-engine/
+├── live_rsi_trader.py # Main
+trading bot entry point
+├── config/
+│ └── trading_params.yaml # Strategy
+configuration & parameters
+└── core/ # Core
+strategy modules
+├── **init**.py
+├── signal_generator.py # Entry/exit  
+ signal logic
+│ ├── RSISignalGenerator # Basic RSI  
+ signals
+│ ├── ImprovedRSIEntry #
+Multi-confirmation system
+│ └── MinimalFilterRSIEntry # Live trading  
+ optimized (ACTIVE)
+├── risk_manager.py # Position  
+ sizing & risk calculations
+├── trailing_stop_manager.py # Advanced  
+ exit system
+│ ├── TrailingStopManager # 3-stage
+trailing stop logic
+│ └── TrailingStopStrategy # Strategy
+variants (A/B/C/D)
+└── indicators/ # Technical  
+ indicator calculations
+├── **init**.py
+├── base.py # Base classes  
+ for indicators
+├── oscillators.py # RSI
+calculation (MT5 standard)
+├── trend.py # EMA & trend  
+ filter logic
+├── volatility.py # ATR
+calculation
+├── momentum.py # Momentum
+indicators
+└── volume.py # Volume
+indicators
 
----
+Key File Relationships:
 
-### 🚨 **CRITICAL SUCCESS FACTORS**
+live_rsi_trader.py → Core orchestrator that:
 
-1. **Reliability First**: System must handle MT5 disconnections gracefully
-2. **Performance Tracking**: Continuous monitoring of strategy degradation
-3. **Risk Management**: Multiple layers of protection against large losses
-4. **Maintainability**: Code structure supports easy strategy modifications
-5. **Monitoring**: Full visibility into system health and performance
+- Loads config from config/trading_params.yaml
+- Uses MinimalFilterRSIEntry from signal_generator.py
+- Implements TrailingStopManager Strategy D
+- Calculates RSI via RSICalculator from oscillators.py
+- Calculates ATR via ATRCalculator from volatility.py
+- Applies trend filtering via TrendFilter from trend.py
 
----
+Configuration Flow:
+trading_params.yaml → live_rsi_trader.py → core modules
 
-**Key Improvements Made:**
+Signal Processing Chain:
+Market Data → RSI/ATR Calculation → Signal Generation →  
+ Risk Management → Order Execution → Trailing Stop
+Management
 
-- Added market microstructure considerations (spread/volatility filters)
-- Enhanced risk management with correlation limits and drawdown triggers
-- Included system health monitoring and fault tolerance
-- Added performance degradation detection
-- Comprehensive logging and alerting system
-- Real-world execution considerations (gaps, weekends, slippage)
-
-This version focuses on **production reliability** rather than just basic functionality - critical for live trading success.
+This modular structure allows each component to be
+tested, modified, and optimized independently while
+maintaining clear separation of concerns.

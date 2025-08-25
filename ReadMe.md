@@ -65,19 +65,113 @@ quant-trading-engine/
    pytest tests/ --cov=core   # With coverage
    ```
 
+6. **Start Trading**
+
+   **Single Instance (Traditional):**
+   ```bash
+   python live_rsi_trader.py                                    # Default EURUSD config
+   python live_rsi_trader.py --config config/custom_config.yaml # Custom config
+   ```
+
+   **Multi-Instance Portfolio Trading:**
+   ```bash
+   # Manual execution (separate terminals) 
+   python live_rsi_trader.py --config config/trading_params_eurusd.yaml
+   python live_rsi_trader.py --config config/trading_params_usdjpy.yaml  
+   python live_rsi_trader.py --config config/trading_params_gbpusd.yaml
+
+   # Automated dynamic startup (discovers all configs automatically)
+   python start_instance.py   # Cross-platform Python launcher
+   run_multi_instance.bat      # Windows wrapper  
+   ./run_multi_instance.sh     # Linux/Mac wrapper
+   ```
+
 ## 🎯 Current Strategies
 
-- **RSI Mean Reversion**
+### RSI Momentum Trading with ATR Trailing Stops ✅
 
-  - Entry on RSI oversold/overbought
-  - Exit on RSI mean reversion
-  - ATR-based position sizing
-  - Advanced risk management
+**Core Features:**
+- RSI momentum-filtered entry signals
+- 3-stage ATR trailing stop system
+- Dynamic position sizing with portfolio risk controls
+- **Multi-instrument support** - Run multiple instances simultaneously
 
-- **[Coming Soon]**
-  - EMA Crossover
-  - VWAP + Williams %R
-  - Breakout + ATR
+**Supported Trading Modes:**
+- **Single Instance**: Traditional single-pair trading
+- **Multi-Instance**: Professional portfolio approach with multiple instruments
+
+### Strategy Configurations Available:
+- **Conservative EURUSD M5**: RSI 14, 1% risk, Strategy D
+- **Moderate USDJPY M15**: RSI 20, 2% risk, Strategy B with trend filtering  
+- **Aggressive GBPUSD M5**: RSI 10, 1% risk, Strategy C for swing trading
+
+### [Coming Soon]
+- EMA Crossover strategies
+- VWAP + Williams %R combinations
+- Breakout + ATR momentum systems
+
+## 🔥 Multi-Instance Trading
+
+Transform your single-pair trading into professional portfolio management by running multiple instruments simultaneously.
+
+### Key Features
+- **Independent Configurations**: Each instrument has its own RSI periods, timeframes, and risk parameters
+- **Unique Magic Numbers**: Automatic position identification per instance (100001, 100002, 100003...)
+- **Isolated Logging**: Each instance logs to its own file with broker time sync
+- **Process Isolation**: One instance crash doesn't affect others
+- **Portfolio Risk Management**: Combined risk monitoring across all instances
+
+### Available Configurations
+```yaml
+# EURUSD M5 - Conservative
+instrument: 'EURUSD', timeframe: 'M5', magic: 100001
+rsi_period: 14, risk: 1.0%, strategy: 'D'
+
+# USDJPY M15 - Moderate  
+instrument: 'USDJPY', timeframe: 'M15', magic: 100002
+rsi_period: 20, risk: 2.0%, strategy: 'B', trend_filter: enabled
+
+# GBPUSD M5 - Swing Trading
+instrument: 'GBPUSD', timeframe: 'M5', magic: 100003  
+rsi_period: 10, risk: 1.0%, strategy: 'C'
+```
+
+### Quick Start Multi-Instance
+```bash
+# Option 1: Dynamic Python launcher (RECOMMENDED)
+python start_instance.py   # Discovers all configs automatically, no hardcoding
+
+# Option 2: Manual execution (separate terminals)
+python live_rsi_trader.py -c config/trading_params_eurusd.yaml
+python live_rsi_trader.py -c config/trading_params_usdjpy.yaml  
+python live_rsi_trader.py -c config/trading_params_gbpusd.yaml
+
+# Option 3: OS-specific wrappers (call start_instance.py internally)
+run_multi_instance.bat      # Windows wrapper
+./run_multi_instance.sh     # Linux/Mac wrapper
+```
+
+### Monitoring
+```bash
+# Check current configurations dynamically
+python config_reader.py
+
+# View detailed config info 
+python check_config.py config/trading_params_eurusd.yaml
+
+# Monitor logs (paths are dynamic based on actual config values)
+tail -f logs/live_trader_*.log
+
+# Find exact log paths dynamically
+python -c "
+from pathlib import Path
+import yaml
+for config_file in sorted(Path('config').glob('trading_params_*.yaml')):
+    with open(config_file) as f:
+        p = yaml.safe_load(f)['trading_params']
+    print(f'logs/live_trader_{p[\"instrument\"].lower()}_{p[\"timeframe\"].lower()}_{p[\"magic_number\"]}.log')
+"
+```
 
 ## 🏗️ Architecture
 
@@ -105,6 +199,12 @@ quant-trading-engine/
    - Real-time execution
    - MT5 integration
    - Error handling
+
+5. **Multi-Instance Architecture**
+   - Run multiple instruments simultaneously
+   - Independent configuration per instrument
+   - Isolated logging and state management
+   - Process fault tolerance
 
 ## 🧪 Development
 
@@ -141,6 +241,10 @@ pytest tests/test_oscillators.py -v -k test_rsi_basic
 ## 📚 Documentation
 
 - [Indicators Module](core/indicators/README.md)
+- [Multi-Instance Trading Guide](.claude/multi_instance_trading.md)
+- [Repository Overview](.claude/repository_overview.md)
+- [RSI Strategy Details](.claude/RSI_mean_reversion.md)
+- [Coding Standards](.claude/coding_standards.md) - **REQUIRED READING**
 - [Strategy Development Guide](docs/strategy_development.md)
 - [Risk Management](docs/risk_management.md)
 

@@ -1,5 +1,7 @@
+import argparse
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 
@@ -20,8 +22,8 @@ from utils.validation import DataValidator, ErrorHandler
 # Import broker time utilities
 from utils.broker_time import setup_broker_time_logging
 
-# Setup logging with broker time synchronization
-logger = setup_broker_time_logging(logging.INFO)
+# Global logger - will be configured per instance in main()
+logger = None
 
 # Initialize modular components
 rsi_calculator = RSICalculator()
@@ -51,8 +53,11 @@ def load_credentials():
         logger.error("Error parsing YAML file: %s", e)
         raise
 
-def load_params():
-    config_path = os.path.join('config', 'trading_params.yaml')
+def load_params(config_path=None):
+    """Load trading parameters from YAML config file"""
+    if config_path is None:
+        config_path = os.path.join('config', 'trading_params.yaml')
+    
     try:
         with open(config_path, 'r') as file:
             return yaml.safe_load(file)
@@ -93,7 +98,7 @@ def initialize_trailing_stops(params):
     
     return True
 
-def check_config_updates(params):
+def check_config_updates(params, config_path=None):
     """Check for configuration updates and apply if needed"""
     global last_config_check
     
@@ -107,7 +112,7 @@ def check_config_updates(params):
         if trailing_config.get('allow_runtime_changes', False):
             # Reload configuration
             try:
-                new_params = load_params()['trading_params']
+                new_params = load_params(config_path)['trading_params']
                 if initialize_trailing_stops(new_params):
                     # logger.info("Configuration reloaded successfully")
                     return new_params
@@ -168,7 +173,7 @@ def validate_stop_distance(symbol, current_price, stop_loss, order_type):
         logger.error(f"{symbol} Error validating stop distance: {e}")
         return False, None
 
-def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
+def place_buy_order(symbol, volume, stop_loss=None, deviation=20, magic_number=12345):
     """Place a BUY market order"""
     # Get symbol info to determine correct filling mode
     symbol_info = mt5.symbol_info(symbol)
@@ -199,7 +204,7 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
         'volume': volume,
         'type': mt5.ORDER_TYPE_BUY,
         'deviation': deviation,
-        'magic': 12345,  # Magic number to identify our trades
+        'magic': magic_number,  # Magic number to identify this trading instance
         'comment': 'RSI Strategy BUY',
         'type_time': mt5.ORDER_TIME_GTC,
         'type_filling': filling_mode,
@@ -242,7 +247,7 @@ def place_buy_order(symbol, volume, stop_loss=None, deviation=20):
     
     return result
 
-def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
+def place_sell_order(symbol, volume, stop_loss=None, deviation=20, magic_number=12345):
     """Place a SELL market order"""
     # Get symbol info to determine correct filling mode
     symbol_info = mt5.symbol_info(symbol)
@@ -274,7 +279,7 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20):
         'volume': volume,
         'type': mt5.ORDER_TYPE_SELL,
         'deviation': deviation,
-        'magic': 12345,  # Magic number to identify our trades
+        'magic': magic_number,  # Magic number to identify this trading instance
         'comment': 'RSI Strategy SELL',
         'type_time': mt5.ORDER_TIME_GTC,
         'type_filling': filling_mode,
@@ -535,12 +540,12 @@ def close_position(position):
     
     return result
 
-def live_trading_loop():
+def live_trading_loop(config_path=None):
     """Main live trading loop with ATR Trailing Stop System"""
     logger.info("Starting live trading loop...")
     
     # Load trading parameters
-    params = load_params()['trading_params']
+    params = load_params(config_path)['trading_params']
     
     # Initialize trailing stop system
     if not initialize_trailing_stops(params):
@@ -559,6 +564,9 @@ def live_trading_loop():
     min_position_size = params.get('min_position_size', 0.01)
     max_position_size_percent = params.get('max_position_size_percent', 5.0)
     max_position_size_absolute = params.get('max_position_size_absolute')
+    
+    # Trading instance identification
+    magic_number = params.get('magic_number', 12345)  # Default magic number for backward compatibility
     
     # Portfolio risk management parameters
     portfolio_risk_enabled = params.get('portfolio_risk_enabled', True)
@@ -687,7 +695,7 @@ def live_trading_loop():
                 # logger.info(f"New bar [{bar_time}] - Price: {current_price:.5f}, RSI: {current_rsi:.2f}")
                 
                 # Check for configuration updates (hot-reload)
-                params = check_config_updates(params)
+                params = check_config_updates(params, config_path)
                 
                 # Get current positions with multiple checks to ensure accuracy
                 positions = get_current_positions(symbol)
@@ -894,7 +902,7 @@ def live_trading_loop():
                         else:
                             logger.info(f"{symbol} Portfolio risk check passed: {current_risk:.2f}% + {new_risk:.2f}% = {current_risk + new_risk:.2f}% (limit: {max_total_portfolio_risk}%)")
                     
-                    result = place_buy_order(symbol, position_size, stop_loss)
+                    result = place_buy_order(symbol, position_size, stop_loss, magic_number=magic_number)
                     if result:
                         logger.info(f"{symbol} BUY POSITION OPENED:")
                         logger.info(f"   Entry Price: {current_price:.5f}")
@@ -946,7 +954,7 @@ def live_trading_loop():
                         else:
                             logger.info(f"{symbol} Portfolio risk check passed: {current_risk:.2f}% + {new_risk:.2f}% = {current_risk + new_risk:.2f}% (limit: {max_total_portfolio_risk}%)")
                     
-                    result = place_sell_order(symbol, position_size, stop_loss)
+                    result = place_sell_order(symbol, position_size, stop_loss, magic_number=magic_number)
                     if result:
                         logger.info(f"{symbol} SELL POSITION OPENED:")
                         logger.info(f"   Entry Price: {current_price:.5f}")
@@ -993,24 +1001,94 @@ def live_trading_loop():
     
     logger.info("Live trading loop ended")
 
+def setup_instance_logging(params, config_path=None):
+    """Setup logging for this trading instance with unique log file"""
+    global logger
+    
+    # Extract instrument and timeframe for log filename
+    instrument = params.get('instrument', 'UNKNOWN').replace('/', '')  # Remove '/' for filename
+    timeframe = params.get('timeframe', 'M5')
+    magic_number = params.get('magic_number', 12345)
+    
+    # Create log filename: live_trader_eurusd_m5_100001.log
+    log_filename = f"live_trader_{instrument.lower()}_{timeframe.lower()}_{magic_number}.log"
+    log_path = os.path.join('logs', log_filename)
+    
+    # Ensure logs directory exists
+    os.makedirs('logs', exist_ok=True)
+    
+    # Setup logger with broker time synchronization and custom log file
+    logger = setup_broker_time_logging(logging.INFO, log_file=log_path)
+    
+    logger.info(f"=== INSTANCE LOGGING INITIALIZED ===")
+    logger.info(f"Log file: {log_path}")
+    logger.info(f"Config file: {config_path or 'config/trading_params.yaml'}")
+    logger.info(f"Magic number: {magic_number}")
+    
+    return logger
+
+def parse_arguments():
+    """Parse command-line arguments"""
+    parser = argparse.ArgumentParser(
+        description="RSI Live Trading Bot with ATR Trailing Stops",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python live_rsi_trader.py                                    # Use default config
+  python live_rsi_trader.py --config config/eurusd_m5.yaml     # Use custom config
+  python live_rsi_trader.py -c config/usdjpy_m15.yaml          # Short form
+        """
+    )
+    
+    parser.add_argument(
+        '--config', '-c',
+        type=str,
+        default=None,
+        help='Path to trading configuration file (default: config/trading_params.yaml)'
+    )
+    
+    return parser.parse_args()
+
 def main():
     """Main function"""
+    global logger
+    
+    # Parse command-line arguments
+    args = parse_arguments()
+    
+    # Load initial configuration to setup logging
+    try:
+        params = load_params(args.config)['trading_params']
+        # Setup instance-specific logging
+        logger = setup_instance_logging(params, args.config)
+    except Exception as e:
+        # Use basic logging for error reporting if config loading fails
+        logger = setup_broker_time_logging(logging.INFO)
+        logger.error(f"Failed to load initial configuration: {e}")
+        return
+    
     logger.info("=== RSI LIVE TRADING BOT WITH ATR TRAILING STOPS ===")
     logger.info("WARNING: MAKE SURE YOU'RE USING A DEMO ACCOUNT!")
     
-    # Load initial configuration
-    try:
-        params = load_params()['trading_params']
-        trailing_config = params.get('trailing_stops', {})
-        if trailing_config.get('enabled', False):
-            strategy = trailing_config.get('strategy', 'B')
-            logger.info(f"ATR Trailing Stop System: ENABLED")
-            logger.info(f"Strategy: {strategy}")
-            logger.info(f"Runtime Strategy Changes: {'ENABLED' if trailing_config.get('allow_runtime_changes', False) else 'DISABLED'}")
-        else:
-            logger.info("Using Legacy ATR Stop Loss System")
-    except Exception as e:
-        logger.error(f"Failed to load initial configuration: {e}")
+    if args.config:
+        logger.info(f"Using configuration file: {args.config}")
+    else:
+        logger.info("Using default configuration file: config/trading_params.yaml")
+    
+    instrument = params.get('instrument', 'UNKNOWN')
+    timeframe = params.get('timeframe', 'UNKNOWN')
+    magic_number = params.get('magic_number', 12345)
+    logger.info(f"Trading instrument: {instrument} on {timeframe} timeframe")
+    logger.info(f"Magic number: {magic_number}")
+    
+    trailing_config = params.get('trailing_stops', {})
+    if trailing_config.get('enabled', False):
+        strategy = trailing_config.get('strategy', 'B')
+        logger.info(f"ATR Trailing Stop System: ENABLED")
+        logger.info(f"Strategy: {strategy}")
+        logger.info(f"Runtime Strategy Changes: {'ENABLED' if trailing_config.get('allow_runtime_changes', False) else 'DISABLED'}")
+    else:
+        logger.info("Using Legacy ATR Stop Loss System")
     
     # Initialize MT5 connection
     if not initialize_mt5():
@@ -1018,8 +1096,8 @@ def main():
         return
     
     try:
-        # Start live trading
-        live_trading_loop()
+        # Start live trading with config path
+        live_trading_loop(args.config)
     finally:
         # Cleanup
         mt5_connector.disconnect()

@@ -12,7 +12,9 @@
       "Bash(ls:*)",
       "Bash(grep:*)",
       "Bash(./venv/Scripts/activate)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(chmod:*)",
+      "Bash(git restore:*)"
     ],
     "deny": []
   }

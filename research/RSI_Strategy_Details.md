@@ -3,23 +3,23 @@
 Strategy Overview
 
 This is a professional mean-reversion trading strategy built around RSI (Relative Strength Index) signals enhanced with
-momentum confirmation and sophisticated ATR-based trailing stop management. The strategy operates on XAUUSDx (Gold) using
+momentum confirmation and sophisticated ATR-based trailing stop management. The strategy operates on EURUSD using
 M1 timeframe.
 
 Core Parameters (from trading_params.yaml)
 
 Basic Configuration
 
-- Instrument: XAUUSDx (Gold)
-- Timeframe: M1 (1-minute bars)
-- Position Size: 0.50 lots
+- Instrument: EURUSD
+- Timeframe: M5
+- Position Size: Dynamic - 1% of account balance per trade
 - Contract Size: 100,000
 
 RSI Settings
 
 - RSI Period: 14
-- Oversold Level: 35 (BUY signal threshold)
-- Overbought Level: 65 (SELL signal threshold)
+- Oversold Level: 25 (BUY signal threshold)
+- Overbought Level: 75 (SELL signal threshold)
 - Exit Level: 50 (neutral zone for exits)
 
 Momentum Filter
@@ -46,29 +46,25 @@ BUY Signals
 
 1. Momentum-Filtered (default):
 
-
-    - Previous RSI was below 35 (oversold)
-    - Current RSI shows recovery: current_rsi > previous_rsi + 2.0
-    - Avoid extreme conditions: current_rsi > 15
+   - Previous RSI was below 25 (oversold)
+   - Current RSI shows recovery: current_rsi > previous_rsi + 2.0
+   - Avoid extreme conditions: current_rsi > 15
 
 2. Basic RSI (fallback):
 
-
-    - Simple condition: current_rsi < 35
+   - Simple condition: current_rsi < 25
 
 SELL Signals
 
 1. Momentum-Filtered (default):
 
-
-    - Previous RSI was above 65 (overbought)
-    - Current RSI shows decline: current_rsi < previous_rsi - 2.0
-    - Avoid extreme conditions: current_rsi < 85
+   - Previous RSI was above 75 (overbought)
+   - Current RSI shows decline: current_rsi < previous_rsi - 2.0
+   - Avoid extreme conditions: current_rsi < 85
 
 2. Basic RSI (fallback):
 
-
-    - Simple condition: current_rsi > 65
+   - Simple condition: current_rsi > 75
 
 Trend Filter Application
 
@@ -119,11 +115,9 @@ Risk Management
 
 Position Sizing
 
-Fixed at 0.50 lots per trade, managed by RiskManager class:
+Dynamic position sizing based on account balance and risk percentage:
 
-- Validates stop loss distances meet broker requirements
-- Adjusts stop losses to comply with minimum distance requirements
-- Calculates risk-reward ratios for analysis
+- logic maintained in risk_manager.py
 
 Stop Loss Validation
 
@@ -153,81 +147,72 @@ Safety Features
 - Error Handling: Comprehensive exception handling with fallback behaviors
 - Hot Reload: Configuration changes applied without restart (6000-second intervals)
 
-Current Configuration Summary
-
-- Strategy: RSI mean reversion with momentum confirmation
-- Exit Method: ATR Trailing Stops (Strategy D)
-- Risk Profile: Moderate (1.0 ATR breakeven, 1.5 ATR trailing, 2.0 ATR hard stop)
-- Filtering: Momentum-based entry confirmation enabled
-- Trend Filter: Disabled (allows all RSI signals regardless of trend)
-- Position Management: Single position at a time, tracked by bot
-
 The strategy is designed for professional automated trading with robust risk management and detailed performance tracking  
  capabilities.
 
-
 ● Here's the directory structure showing the relevant
-  strategy and core files:
+strategy and core files:
 
 quant-trading-engine/
-  ├── live_rsi_trader.py                    # Main
-  trading bot entry point
-  ├── config/
-  │   └── trading_params.yaml              # Strategy 
-  configuration & parameters
-  └── core/                                 # Core 
-  strategy modules
-      ├── __init__.py
-      ├── signal_generator.py               # Entry/exit      
-  signal logic
-      │   ├── RSISignalGenerator           # Basic RSI        
-  signals
-      │   ├── ImprovedRSIEntry            #
-  Multi-confirmation system
-      │   └── MinimalFilterRSIEntry       # Live trading      
-  optimized (ACTIVE)
-      ├── risk_manager.py                   # Position        
-  sizing & risk calculations
-      ├── trailing_stop_manager.py          # Advanced        
-  exit system
-      │   ├── TrailingStopManager         # 3-stage
-  trailing stop logic
-      │   └── TrailingStopStrategy        # Strategy
-  variants (A/B/C/D)
-      └── indicators/                       # Technical       
-  indicator calculations
-          ├── __init__.py
-          ├── base.py                      # Base classes     
-   for indicators
-          ├── oscillators.py               # RSI
-  calculation (MT5 standard)
-          ├── trend.py                     # EMA & trend      
-  filter logic
-          ├── volatility.py                # ATR
-  calculation
-          ├── momentum.py                  # Momentum
-  indicators
-          └── volume.py                    # Volume
-  indicators
+├── live_rsi_trader.py # Main
+trading bot entry point
+├── config/
+│ └── trading_params.yaml # Strategy
+configuration & parameters
+└── core/ # Core
+strategy modules
+├── **init**.py
+├── signal_generator.py # Entry/exit  
+ signal logic
+│ ├── RSISignalGenerator # Basic RSI  
+ signals
+│ ├── ImprovedRSIEntry #
+Multi-confirmation system
+│ └── MinimalFilterRSIEntry # Live trading  
+ optimized (ACTIVE)
+├── risk_manager.py # Position  
+ sizing & risk calculations
+├── trailing_stop_manager.py # Advanced  
+ exit system
+│ ├── TrailingStopManager # 3-stage
+trailing stop logic
+│ └── TrailingStopStrategy # Strategy
+variants (A/B/C/D)
+└── indicators/ # Technical  
+ indicator calculations
+├── **init**.py
+├── base.py # Base classes  
+ for indicators
+├── oscillators.py # RSI
+calculation (MT5 standard)
+├── trend.py # EMA & trend  
+ filter logic
+├── volatility.py # ATR
+calculation
+├── momentum.py # Momentum
+indicators
+└── volume.py # Volume
+indicators
 
-  Key File Relationships:
+Key File Relationships:
 
-  live_rsi_trader.py → Core orchestrator that:
-  - Loads config from config/trading_params.yaml
-  - Uses MinimalFilterRSIEntry from signal_generator.py       
-  - Implements TrailingStopManager Strategy D
-  - Calculates RSI via RSICalculator from oscillators.py      
-  - Calculates ATR via ATRCalculator from volatility.py       
-  - Applies trend filtering via TrendFilter from trend.py     
+live_rsi_trader.py → Core orchestrator that:
 
-  Configuration Flow:
-  trading_params.yaml → live_rsi_trader.py → core modules     
+- Loads config from config/trading_params.yaml
+- Uses MinimalFilterRSIEntry from signal_generator.py
+- Implements TrailingStopManager Strategy D
+- Calculates RSI via RSICalculator from oscillators.py
+- Calculates ATR via ATRCalculator from volatility.py
+- Applies trend filtering via TrendFilter from trend.py
 
-  Signal Processing Chain:
-  Market Data → RSI/ATR Calculation → Signal Generation →     
-   Risk Management → Order Execution → Trailing Stop
-  Management
+Configuration Flow:
+trading_params.yaml → live_rsi_trader.py → core modules
 
-  This modular structure allows each component to be
-  tested, modified, and optimized independently while
-  maintaining clear separation of concerns.
+Signal Processing Chain:
+Market Data → RSI/ATR Calculation → Signal Generation →  
+ Risk Management → Order Execution → Trailing Stop
+Management
+
+This modular structure allows each component to be
+tested, modified, and optimized independently while
+maintaining clear separation of concerns.

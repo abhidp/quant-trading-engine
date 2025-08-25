@@ -1,7 +1,7 @@
 trading_params:
   instrument: 'EURUSD'
   timeframe: 'M5'
-  magic_number: 100001                     # Unique identifier for this trading instance
+  magic_number: 100001                     # Unique identifier for EURUSD M5 instance
   
   # Position Sizing Configuration
   use_dynamic_sizing: true              # Enable dynamic position sizing based on account balance
@@ -27,8 +27,8 @@ trading_params:
   use_cache: true
   cache_dir: 'data/cache'
   rsi_period: 14
-  rsi_oversold: 35
-  rsi_overbought: 65
+  rsi_oversold: 25                     # Conservative oversold level
+  rsi_overbought: 75                   # Conservative overbought level
   rsi_exit_level: 50
 
   # RSI Momentum Filtering
@@ -54,7 +54,6 @@ trading_params:
     strategy: 'D' # Options: A (Pure), B (Time-based), C (Aggressive), D (Custom)
     allow_runtime_changes: true
     config_check_interval: 6000 # Check for config changes every N seconds
-
 
     # Strategy Descriptions:
     # A: Breakeven@1.5 ATR, Trail@1.0 ATR, Hard Stop@2.0 ATR (Conservative)
