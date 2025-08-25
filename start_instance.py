@@ -28,8 +28,40 @@ def get_config_summary(config_path):
     except Exception as e:
         return {'error': str(e), 'config_path': config_path}
 
+def start_all_instances_windows_terminal(config_paths):
+    """Start all instances in Windows Terminal with tabs"""
+    if not config_paths:
+        return False
+    
+    # Build Windows Terminal command with multiple tabs
+    wt_cmd_parts = ['wt']
+    
+    for i, config_path in enumerate(config_paths):
+        summary = get_config_summary(config_path)
+        if 'error' in summary:
+            print(f"ERROR: Skipping {config_path}: {summary['error']}")
+            continue
+            
+        title = f"{summary['instrument']}-{summary['timeframe']}-RSI-Trader-{summary['magic_number']}"
+        
+        if i == 0:
+            # First tab
+            wt_cmd_parts.extend(['--title', f'"{title}"', 'cmd', '/k', f'"python live_rsi_trader.py --config {config_path}"'])
+        else:
+            # Additional tabs
+            wt_cmd_parts.extend([';', 'new-tab', '--title', f'"{title}"', 'cmd', '/k', f'"python live_rsi_trader.py --config {config_path}"'])
+    
+    # Execute Windows Terminal command
+    wt_cmd = ' '.join(wt_cmd_parts)
+    print(f"Starting Windows Terminal with {len(config_paths)} tabs...")
+    try:
+        result = subprocess.run(wt_cmd, shell=True, capture_output=True, text=True)
+        return result.returncode == 0
+    except:
+        return False
+
 def start_single_instance(config_path, delay=0):
-    """Start a single trading instance"""
+    """Start a single trading instance (fallback method)"""
     if delay > 0:
         time.sleep(delay)
     
@@ -90,10 +122,22 @@ def main():
     input("Press Enter to continue or Ctrl+C to cancel...")
     
     print()
-    # Start all instances with 3-second delays
-    for i, config_path in enumerate(valid_configs):
-        delay = i * 3  # 3-second delay between starts
-        start_single_instance(config_path, delay)
+    # Try Windows Terminal first (single window with tabs)
+    if os.name == 'nt':
+        print("Attempting to use Windows Terminal (single window with tabs)...")
+        if start_all_instances_windows_terminal(valid_configs):
+            print("SUCCESS: Started all instances in Windows Terminal")
+        else:
+            print("Windows Terminal not available, falling back to separate windows...")
+            # Fallback to separate windows
+            for i, config_path in enumerate(valid_configs):
+                delay = i * 3  # 3-second delay between starts
+                start_single_instance(config_path, delay)
+    else:
+        # Linux/Mac - use separate terminals
+        for i, config_path in enumerate(valid_configs):
+            delay = i * 3  # 3-second delay between starts
+            start_single_instance(config_path, delay)
     
     print()
     print("All instances started! Check individual terminal windows.")
