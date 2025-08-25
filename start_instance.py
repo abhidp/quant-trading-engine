@@ -33,6 +33,9 @@ def start_all_instances_windows_terminal(config_paths):
     if not config_paths:
         return False
     
+    # Get current working directory
+    current_dir = os.getcwd()
+    
     # Build Windows Terminal command with multiple tabs
     wt_cmd_parts = ['wt']
     
@@ -45,15 +48,16 @@ def start_all_instances_windows_terminal(config_paths):
         title = f"{summary['instrument']}-{summary['timeframe']}-RSI-Trader-{summary['magic_number']}"
         
         if i == 0:
-            # First tab
-            wt_cmd_parts.extend(['--title', f'"{title}"', 'cmd', '/k', f'"python live_rsi_trader.py --config {config_path}"'])
+            # First tab with working directory
+            wt_cmd_parts.extend(['--title', f'"{title}"', '--startingDirectory', f'"{current_dir}"', 'cmd', '/k', f'"python live_rsi_trader.py --config {config_path}"'])
         else:
-            # Additional tabs
-            wt_cmd_parts.extend([';', 'new-tab', '--title', f'"{title}"', 'cmd', '/k', f'"python live_rsi_trader.py --config {config_path}"'])
+            # Additional tabs with working directory
+            wt_cmd_parts.extend([';', 'new-tab', '--title', f'"{title}"', '--startingDirectory', f'"{current_dir}"', 'cmd', '/k', f'"python live_rsi_trader.py --config {config_path}"'])
     
     # Execute Windows Terminal command
     wt_cmd = ' '.join(wt_cmd_parts)
     print(f"Starting Windows Terminal with {len(config_paths)} tabs...")
+    print(f"Working directory: {current_dir}")
     try:
         result = subprocess.run(wt_cmd, shell=True, capture_output=True, text=True)
         return result.returncode == 0
