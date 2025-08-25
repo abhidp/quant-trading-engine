@@ -128,6 +128,7 @@ def get_current_positions(symbol):
     return list(positions)
 
 # Risk management functions now centralized in core/risk_manager.py
+# Risk management functions now centralized in core/risk_manager.py
 
 def validate_stop_distance(symbol, current_price, stop_loss, order_type):
     """Validate stop loss distance meets broker requirements"""
@@ -554,15 +555,15 @@ def live_trading_loop():
     # Position sizing parameters
     use_dynamic_sizing = params.get('use_dynamic_sizing', True)
     fixed_lot_size = params.get('lot_size', 0.01)  # Fallback for dynamic sizing
-    risk_percent = params.get('risk_percent', 1.0)
+    default_risk_per_trade = params.get('default_risk_per_trade', 1.0)
     min_position_size = params.get('min_position_size', 0.01)
     max_position_size_percent = params.get('max_position_size_percent', 5.0)
     max_position_size_absolute = params.get('max_position_size_absolute')
     
     # Portfolio risk management parameters
     portfolio_risk_enabled = params.get('portfolio_risk_enabled', True)
-    max_total_risk_percent = params.get('max_total_risk_percent', 5.0)
-    max_single_position_risk_percent = params.get('max_single_position_risk_percent', 1.5)
+    max_total_portfolio_risk = params.get('max_total_portfolio_risk', 5.0)
+    max_risk_per_trade = params.get('max_risk_per_trade', 1.5)
     
     atr_period = params.get('atr_period', 14)
     atr_multiplier = params.get('atr_multiplier', 2.0)
@@ -602,16 +603,17 @@ def live_trading_loop():
         max_desc = f"{max_position_size_percent}% of balance"
         if max_position_size_absolute:
             max_desc += f" (capped at {max_position_size_absolute} lots)"
-        logger.info(f"Position sizing: DYNAMIC - {risk_percent}% risk, Min: {min_position_size}, Max: {max_desc}")
+        logger.info(f"Position sizing: DYNAMIC - {default_risk_per_trade}% default risk, Min: {min_position_size}, Max: {max_desc}")
     else:
         logger.info(f"Position sizing: FIXED - {fixed_lot_size} lots")
     
     if portfolio_risk_enabled:
-        logger.info(f"Portfolio Risk Management: ENABLED")
-        logger.info(f"   Max total exposure: {max_total_risk_percent}%")
-        logger.info(f"   Max per-position risk: {max_single_position_risk_percent}%")
+        logger.info(f"Risk Management: THREE-LAYER PROTECTION")
+        logger.info(f"   Default risk per trade: {default_risk_per_trade}%")
+        logger.info(f"   Max risk per trade: {max_risk_per_trade}%")
+        logger.info(f"   Max total portfolio risk: {max_total_portfolio_risk}%")
     else:
-        logger.info(f"Portfolio Risk Management: DISABLED")
+        logger.info(f"Risk Management: BASIC - Only position sizing active")
     
     if use_trend_filter:
         logger.info(f"Trend Filter: ENABLED - EMA({trend_fast_ema}, {trend_medium_ema}, {trend_slow_ema})")
@@ -871,9 +873,9 @@ def live_trading_loop():
                     # Calculate position size
                     if use_dynamic_sizing and stop_loss is not None:
                         position_size = risk_manager.calculate_advanced_position_size(
-                            symbol, current_price, stop_loss, risk_percent, 
+                            symbol, current_price, stop_loss, default_risk_per_trade, 
                             min_position_size, max_position_size_percent, max_position_size_absolute,
-                            max_single_position_risk_percent
+                            max_risk_per_trade
                         )
                     else:
                         position_size = fixed_lot_size
@@ -881,7 +883,7 @@ def live_trading_loop():
                     # Check portfolio risk limits before opening position
                     if portfolio_risk_enabled and stop_loss is not None:
                         can_open, current_risk, new_risk, risk_reason = risk_manager.can_open_new_position(
-                            symbol, current_price, stop_loss, position_size, max_total_risk_percent
+                            symbol, current_price, stop_loss, position_size, max_total_portfolio_risk
                         )
                         
                         if not can_open:
@@ -890,7 +892,7 @@ def live_trading_loop():
                             logger.info(f"   New position would add: {new_risk:.2f}%")
                             continue
                         else:
-                            logger.info(f"{symbol} Portfolio risk check passed: {current_risk:.2f}% + {new_risk:.2f}% = {current_risk + new_risk:.2f}% (limit: {max_total_risk_percent}%)")
+                            logger.info(f"{symbol} Portfolio risk check passed: {current_risk:.2f}% + {new_risk:.2f}% = {current_risk + new_risk:.2f}% (limit: {max_total_portfolio_risk}%)")
                     
                     result = place_buy_order(symbol, position_size, stop_loss)
                     if result:
@@ -923,9 +925,9 @@ def live_trading_loop():
                     # Calculate position size
                     if use_dynamic_sizing and stop_loss is not None:
                         position_size = risk_manager.calculate_advanced_position_size(
-                            symbol, current_price, stop_loss, risk_percent, 
+                            symbol, current_price, stop_loss, default_risk_per_trade, 
                             min_position_size, max_position_size_percent, max_position_size_absolute,
-                            max_single_position_risk_percent
+                            max_risk_per_trade
                         )
                     else:
                         position_size = fixed_lot_size
@@ -933,7 +935,7 @@ def live_trading_loop():
                     # Check portfolio risk limits before opening position
                     if portfolio_risk_enabled and stop_loss is not None:
                         can_open, current_risk, new_risk, risk_reason = risk_manager.can_open_new_position(
-                            symbol, current_price, stop_loss, position_size, max_total_risk_percent
+                            symbol, current_price, stop_loss, position_size, max_total_portfolio_risk
                         )
                         
                         if not can_open:
@@ -942,7 +944,7 @@ def live_trading_loop():
                             logger.info(f"   New position would add: {new_risk:.2f}%")
                             continue
                         else:
-                            logger.info(f"{symbol} Portfolio risk check passed: {current_risk:.2f}% + {new_risk:.2f}% = {current_risk + new_risk:.2f}% (limit: {max_total_risk_percent}%)")
+                            logger.info(f"{symbol} Portfolio risk check passed: {current_risk:.2f}% + {new_risk:.2f}% = {current_risk + new_risk:.2f}% (limit: {max_total_portfolio_risk}%)")
                     
                     result = place_sell_order(symbol, position_size, stop_loss)
                     if result:

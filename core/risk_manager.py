@@ -4,29 +4,30 @@ Contains position sizing and stop loss calculation logic.
 """
 import MetaTrader5 as mt5
 import logging
+import logging
 
 
 class RiskManager:
     """Risk management calculations for position sizing and stop loss levels"""
     
-    def __init__(self, default_risk_percent=2.0):
+    def __init__(self, default_risk_per_trade=2.0):
         """
         Initialize risk manager
         
         Args:
-            default_risk_percent (float): Default risk percentage per trade
+            default_risk_per_trade (float): Default risk percentage per trade
         """
-        self.default_risk_percent = default_risk_percent
+        self.default_risk_per_trade = default_risk_per_trade
         self.logger = logging.getLogger(__name__)
     
-    def calculate_position_size(self, balance, risk_percent=None, stop_distance=None, 
+    def calculate_position_size(self, balance, default_risk_per_trade=None, stop_distance=None, 
                                contract_size=100000, min_lot=0.01, max_lot=100.0):
         """
         Calculate position size based on risk management rules
         
         Args:
             balance (float): Account balance
-            risk_percent (float, optional): Risk percentage (default: use class default)
+            default_risk_per_trade (float, optional): Risk percentage (default: use class default)
             stop_distance (float, optional): Distance to stop loss in price units
             contract_size (int): Contract size (default: 100000 for forex)
             min_lot (float): Minimum lot size allowed
@@ -35,8 +36,8 @@ class RiskManager:
         Returns:
             float: Calculated position size in lots
         """
-        if risk_percent is None:
-            risk_percent = self.default_risk_percent
+        if default_risk_per_trade is None:
+            default_risk_per_trade = self.default_risk_per_trade
             
         # If no stop distance provided, use a default fixed lot size approach
         if stop_distance is None or stop_distance <= 0:
@@ -44,7 +45,7 @@ class RiskManager:
             return min(0.1, max_lot)
         
         # Calculate risk amount in account currency
-        risk_amount = balance * (risk_percent / 100.0)
+        risk_amount = balance * (default_risk_per_trade / 100.0)
         
         # Calculate position size
         # Position size = Risk amount / (Stop distance * Contract size)
@@ -152,7 +153,7 @@ class RiskManager:
             
         return True
     
-    def calculate_dynamic_position_size(self, symbol, entry_price, stop_loss, risk_percent=1.0, min_size=0.01, max_size=0.1):
+    def calculate_dynamic_position_size(self, symbol, entry_price, stop_loss, default_risk_per_trade=1.0, min_size=0.01, max_size=0.1):
         """
         Calculate position size based on account balance and risk percentage
         
@@ -160,7 +161,7 @@ class RiskManager:
             symbol (str): Trading symbol
             entry_price (float): Entry price
             stop_loss (float): Stop loss price
-            risk_percent (float): Risk percentage of account balance (default: 1.0%)
+            default_risk_per_trade (float): Risk percentage of account balance (default: 1.0%)
             min_size (float): Minimum position size (default: 0.01)
             max_size (float): Maximum position size (default: 0.1)
             
@@ -173,7 +174,7 @@ class RiskManager:
             return min_size
         
         balance = account_info.balance
-        risk_amount = balance * (risk_percent / 100.0)
+        risk_amount = balance * (default_risk_per_trade / 100.0)
         
         # Get symbol info
         symbol_info = mt5.symbol_info(symbol)
@@ -243,9 +244,9 @@ class RiskManager:
         else:
             return 0.0001  # Standard forex
     
-    def calculate_advanced_position_size(self, symbol, entry_price, stop_loss, risk_percent=1.0,
+    def calculate_advanced_position_size(self, symbol, entry_price, stop_loss, default_risk_per_trade=1.0,
                                        min_size=0.01, max_size_percent=5.0, max_size_absolute=None,
-                                       max_single_position_risk_percent=1.5):
+                                       max_risk_per_trade=1.5):
         """
         Calculate position size with advanced risk management and compounding support
         
@@ -253,11 +254,11 @@ class RiskManager:
             symbol (str): Trading symbol
             entry_price (float): Entry price
             stop_loss (float): Stop loss price
-            risk_percent (float): Risk percentage of account balance (default: 1.0%)
+            default_risk_per_trade (float): Normal risk per trade (% of account balance, default: 1.0%)
             min_size (float): Minimum position size (default: 0.01)
             max_size_percent (float): Maximum position size as % of balance (default: 5.0%)
             max_size_absolute (float, optional): Absolute maximum in lots (None = no hard limit)
-            max_single_position_risk_percent (float): Maximum risk per single position (default: 1.5%)
+            max_risk_per_trade (float): Never exceed this per individual trade (default: 1.5%)
             
         Returns:
             float: Calculated position size in lots
@@ -268,15 +269,15 @@ class RiskManager:
             self.logger.error("Could not get account balance, using minimum position size")
             return min_size
         
-        # Apply per-position risk cap (prevent single position from using entire portfolio allowance)
-        effective_risk_percent = min(risk_percent, max_single_position_risk_percent)
+        # Apply per-trade risk cap (prevent single trade from using entire portfolio allowance)
+        effective_risk_percent = min(default_risk_per_trade, max_risk_per_trade)
         
         # Calculate risk amount using the capped risk percentage
         risk_amount = balance * (effective_risk_percent / 100.0)
         
         # Log if risk was capped
-        if effective_risk_percent != risk_percent:
-            self.logger.info(f"Position risk capped: {risk_percent:.1f}% -> {effective_risk_percent:.1f}% (per-position limit)")
+        if effective_risk_percent != default_risk_per_trade:
+            self.logger.info(f"Trade risk capped: {default_risk_per_trade:.1f}% -> {effective_risk_percent:.1f}% (max per-trade limit)")
         
         # Get symbol info for contract size
         symbol_info = mt5.symbol_info(symbol)
@@ -393,7 +394,7 @@ class RiskManager:
         
         return total_risk_amount, current_risk_percent, position_details
     
-    def can_open_new_position(self, symbol, entry_price, stop_loss, position_size, max_total_risk_percent):
+    def can_open_new_position(self, symbol, entry_price, stop_loss, position_size, max_total_portfolio_risk):
         """
         Check if opening a new position would exceed portfolio risk limits
         
@@ -402,7 +403,7 @@ class RiskManager:
             entry_price (float): Proposed entry price
             stop_loss (float): Proposed stop loss
             position_size (float): Proposed position size in lots
-            max_total_risk_percent (float): Maximum total portfolio risk percentage
+            max_total_portfolio_risk (float): Never exceed this across all trades (% of account balance)
             
         Returns:
             tuple: (can_open, current_risk_percent, new_position_risk_percent, reason)
@@ -432,8 +433,8 @@ class RiskManager:
         total_risk_after = current_risk_percent + new_position_risk_percent
         
         # Check if it would exceed the limit
-        if total_risk_after > max_total_risk_percent:
-            reason = f"Portfolio risk limit exceeded: {total_risk_after:.2f}% > {max_total_risk_percent:.2f}%"
+        if total_risk_after > max_total_portfolio_risk:
+            reason = f"Portfolio risk limit exceeded: {total_risk_after:.2f}% > {max_total_portfolio_risk:.2f}%"
             return False, current_risk_percent, new_position_risk_percent, reason
         
         return True, current_risk_percent, new_position_risk_percent, "Within risk limits"
