@@ -48,7 +48,7 @@ def start_single_instance(config_path, delay=0):
     
     # Start the instance
     if os.name == 'nt':  # Windows
-        cmd = ['start', title, 'cmd', '/k', f'python live_rsi_trader.py --config {config_path}']
+        cmd = f'start "{title}" cmd /k "python live_rsi_trader.py --config {config_path}"'
         subprocess.run(cmd, shell=True)
     else:  # Linux/Mac
         cmd = ['gnome-terminal', f'--title={title}', '--', 'python', 'live_rsi_trader.py', '--config', config_path]
