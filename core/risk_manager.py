@@ -4,6 +4,7 @@ Contains position sizing and stop loss calculation logic.
 """
 import MetaTrader5 as mt5
 import logging
+import logging
 
 
 class RiskManager:

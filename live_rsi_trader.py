@@ -128,6 +128,7 @@ def get_current_positions(symbol):
     return list(positions)
 
 # Risk management functions now centralized in core/risk_manager.py
+# Risk management functions now centralized in core/risk_manager.py
 
 def validate_stop_distance(symbol, current_price, stop_loss, order_type):
     """Validate stop loss distance meets broker requirements"""
