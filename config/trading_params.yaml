@@ -1,6 +1,6 @@
 trading_params:
-  instrument: 'XAUUSDx'
-  timeframe: 'M1'
+  instrument: 'EURUSD'
+  timeframe: 'M5'
   
   # Position Sizing Configuration
   use_dynamic_sizing: true              # Enable dynamic position sizing based on account balance
