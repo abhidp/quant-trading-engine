@@ -37,7 +37,7 @@ trading_params:
 
   # Trend Filter (prevents counter-trend trades)
   trend_filter:
-    enabled: true # Enable trend filtering for JPY pairs
+    enabled: false # Enable trend filtering for JPY pairs
     fast_ema: 12 # Fast EMA
     medium_ema: 26 # Medium EMA
     slow_ema: 50 # Slow EMA
