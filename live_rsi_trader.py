@@ -325,7 +325,7 @@ def place_sell_order(symbol, volume, stop_loss=None, deviation=20, magic_number=
 
 def initialize_position_tracking(mt5_position, entry_price):
     """Initialize trailing stop tracking for a new position"""
-    global position_tracking, trailing_stop_manager
+    global position_tracking, trailing_stop_manager, timeframe
     
     if trailing_stop_manager is None:
         return
@@ -343,7 +343,7 @@ def initialize_position_tracking(mt5_position, entry_price):
     try:
         # Get recent bars for ATR calculation
         symbol = mt5_position.symbol
-        timeframe = mt5.TIMEFRAME_M1  # Use current timeframe from config
+        # Use actual timeframe from config (global variable)
         bars = mt5.copy_rates_from_pos(symbol, timeframe, 0, 50)
         
         if bars is not None:
@@ -542,6 +542,7 @@ def close_position(position):
 
 def live_trading_loop(config_path=None):
     """Main live trading loop with ATR Trailing Stop System"""
+    global timeframe
     logger.info("Starting live trading loop...")
     
     # Load trading parameters
@@ -1051,7 +1052,7 @@ Examples:
 
 def main():
     """Main function"""
-    global logger
+    global logger, timeframe
     
     # Parse command-line arguments
     args = parse_arguments()
