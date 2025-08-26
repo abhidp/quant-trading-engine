@@ -12,7 +12,7 @@ trading_params:
   lot_size: 0.25 # Fixed lot size (used when dynamic sizing is disabled)
 
   # Portfolio Risk Management (Three-Layer Protection)
-  max_risk_per_trade: 1.0 # Conservative per trade limit for M1
+  max_risk_per_trade: 2.0 # Conservative per trade limit for M1
   max_total_portfolio_risk: 5.0 # Never exceed this across all trades (% of account balance)
   portfolio_risk_enabled: true # Enable portfolio-level risk management
 
