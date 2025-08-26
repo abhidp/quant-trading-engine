@@ -301,8 +301,17 @@ class RiskManager:
         contract_size = symbol_info.trade_contract_size
         
         if stop_distance > 0:
-            # Correct position size formula: Risk amount / (Stop distance in price units * Contract size)
-            position_size = risk_amount / (stop_distance * contract_size)
+            # For JPY pairs, we need to calculate pip value in account currency
+            if 'JPY' in symbol:
+                # For JPY pairs: pip value = (pip size / exchange rate) * contract size
+                # Since we're trading USDJPY, 1 pip = 0.01, pip value ≈ (0.01 / entry_price) * 100,000
+                pip_value_usd = (pip_size / entry_price) * contract_size
+                position_size = risk_amount / (stop_distance_pips * pip_value_usd)
+                self.pip_value_for_logging = pip_value_usd  # Store for logging
+            else:
+                # For non-JPY pairs: standard calculation
+                position_size = risk_amount / (stop_distance * contract_size)
+                self.pip_value_for_logging = None
         else:
             self.logger.warning("Stop distance is zero, using minimum position size")
             return min_size
@@ -328,9 +337,15 @@ class RiskManager:
         # Round to appropriate precision (0.01 lots)
         position_size = round(position_size, 2)
         
-        self.logger.info(f"Position sizing: Balance=${balance:.2f}, Risk=${risk_amount:.2f}, "
-                        f"Stop={stop_distance_pips:.1f}pips, Size={position_size:.2f}lots, "
-                        f"DynamicMax={dynamic_max_size:.2f}lots")
+        # Enhanced logging for debugging
+        if hasattr(self, 'pip_value_for_logging') and self.pip_value_for_logging is not None:
+            self.logger.info(f"Position sizing (JPY): Balance=${balance:.2f}, Risk=${risk_amount:.2f}, "
+                            f"Stop={stop_distance_pips:.1f}pips, PipValue=${self.pip_value_for_logging:.2f}, "
+                            f"Size={position_size:.2f}lots, DynamicMax={dynamic_max_size:.2f}lots")
+        else:
+            self.logger.info(f"Position sizing: Balance=${balance:.2f}, Risk=${risk_amount:.2f}, "
+                            f"Stop={stop_distance_pips:.1f}pips, Size={position_size:.2f}lots, "
+                            f"DynamicMax={dynamic_max_size:.2f}lots")
         
         return position_size
     
