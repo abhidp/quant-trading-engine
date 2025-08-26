@@ -1,21 +1,21 @@
 trading_params:
-  instrument: 'GBPUSD'
+  instrument: 'EURUSD'
   timeframe: 'M5'
-  magic_number: 100003                     # Unique identifier for GBPUSD M1 instance
-  
+  magic_number: 100002
+
   # Position Sizing Configuration
-  use_dynamic_sizing: true              # Enable dynamic position sizing based on account balance
-  default_risk_per_trade: 1          # Lower risk for high-frequency M1 trading (% of account balance)
-  min_position_size: 0.01              # Minimum position size in lots
-  max_position_size_percent: 2.0       # Lower max position for M1 scalping
-  max_position_size_absolute: null     # Optional hard cap (null = unlimited compounding)
-  lot_size: 0.25                       # Fixed lot size (used when dynamic sizing is disabled)
-  
+  use_dynamic_sizing: true # Enable dynamic position sizing based on account balance
+  default_risk_per_trade: 1 # Lower risk for high-frequency M1 trading (% of account balance)
+  min_position_size: 0.01 # Minimum position size in lots
+  max_position_size_percent: 2.0 # Lower max position for M1 scalping
+  max_position_size_absolute: null # Optional hard cap (null = unlimited compounding)
+  lot_size: 0.25 # Fixed lot size (used when dynamic sizing is disabled)
+
   # Portfolio Risk Management (Three-Layer Protection)
-  max_risk_per_trade: 1.0              # Conservative per trade limit for M1
-  max_total_portfolio_risk: 5.0        # Never exceed this across all trades (% of account balance)
-  portfolio_risk_enabled: true         # Enable portfolio-level risk management
-  
+  max_risk_per_trade: 1.0 # Conservative per trade limit for M1
+  max_total_portfolio_risk: 5.0 # Never exceed this across all trades (% of account balance)
+  portfolio_risk_enabled: true # Enable portfolio-level risk management
+
   contract_size: 100000
   starting_balance: 10000
 
@@ -26,22 +26,22 @@ trading_params:
   # Cache settings
   use_cache: true
   cache_dir: 'data/cache'
-  rsi_period: 10                       # Shorter RSI for M1 scalping
-  rsi_oversold: 30                     # More extreme levels for M1
-  rsi_overbought: 70
+  rsi_period: 14
+  rsi_oversold: 30 # Conservative oversold level
+  rsi_overbought: 70 # Conservative overbought level
   rsi_exit_level: 50
 
   # RSI Momentum Filtering
-  rsi_momentum_threshold: 1.5 # Lower threshold for faster M1 signals
+  rsi_momentum_threshold: 2.0 # Minimum RSI points change required for entry signal
   use_momentum_filter: true # Enable/disable momentum confirmation
 
   # Trend Filter (prevents counter-trend trades)
   trend_filter:
-    enabled: false # Disable trend filter for M1 scalping
+    enabled: false # Enable/disable trend filtering
     fast_ema: 12 # Fast EMA
     medium_ema: 26 # Medium EMA
     slow_ema: 50 # Slow EMA
-    strength_threshold: 0.001 # Lower threshold for M1 (0.1%)
+    strength_threshold: 0.002 # Minimum strength for strong trend (0.2%)
 
   # ATR Stop Loss parameters (Legacy - for reference)
   use_atr_stop: false # Disabled in favor of trailing stops
@@ -51,9 +51,10 @@ trading_params:
   # ATR Trailing Stop System
   trailing_stops:
     enabled: true
-    strategy: 'C' # Aggressive strategy for M1 scalping
+    strategy: 'A' # Options: A (Pure), B (Time-based), C (Aggressive), D (Custom)
     allow_runtime_changes: true
-    config_check_interval: 3600 # Check more frequently for M1 (1 hour)
+    config_check_interval: 6000 # Check for config changes every N seconds
+
 
     # Strategy Descriptions:
     # A: Breakeven@1.5 ATR, Trail@1.0 ATR, Hard Stop@2.0 ATR (Conservative)

@@ -1,7 +1,7 @@
 trading_params:
   instrument: 'USDJPY'
   timeframe: 'M5'
-  magic_number: 100002 # Unique identifier for USDJPY M15 instance
+  magic_number: 100003
 
   # Position Sizing Configuration
   use_dynamic_sizing: true # Enable dynamic position sizing based on account balance
@@ -26,22 +26,22 @@ trading_params:
   # Cache settings
   use_cache: true
   cache_dir: 'data/cache'
-  rsi_period: 20 # Longer RSI period for 15min timeframe
-  rsi_oversold: 30 # Slightly different levels
-  rsi_overbought: 70
+  rsi_period: 14
+  rsi_oversold: 30 # Conservative oversold level
+  rsi_overbought: 70 # Conservative overbought level
   rsi_exit_level: 50
 
   # RSI Momentum Filtering
-  rsi_momentum_threshold: 3.0 # Higher threshold for longer timeframe
+  rsi_momentum_threshold: 2.0 # Minimum RSI points change required for entry signal
   use_momentum_filter: true # Enable/disable momentum confirmation
 
   # Trend Filter (prevents counter-trend trades)
   trend_filter:
-    enabled: false # Enable trend filtering for JPY pairs
+    enabled: false # Enable/disable trend filtering
     fast_ema: 12 # Fast EMA
     medium_ema: 26 # Medium EMA
     slow_ema: 50 # Slow EMA
-    strength_threshold: 0.003 # Stronger trend requirement for JPY (0.3%)
+    strength_threshold: 0.002 # Minimum strength for strong trend (0.2%)
 
   # ATR Stop Loss parameters (Legacy - for reference)
   use_atr_stop: false # Disabled in favor of trailing stops
@@ -51,7 +51,7 @@ trading_params:
   # ATR Trailing Stop System
   trailing_stops:
     enabled: true
-    strategy: 'B' # Balanced strategy for JPY pairs
+    strategy: 'A' # Options: A (Pure), B (Time-based), C (Aggressive), D (Custom)
     allow_runtime_changes: true
     config_check_interval: 6000 # Check for config changes every N seconds
 

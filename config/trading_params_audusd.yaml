@@ -1,7 +1,7 @@
 trading_params:
-  instrument: 'EURUSD'
+  instrument: 'AUDUSD'
   timeframe: 'M5'
-  magic_number: 100001
+  magic_number: 100004
 
   # Position Sizing Configuration
   use_dynamic_sizing: true # Enable dynamic position sizing based on account balance
