@@ -1,21 +1,21 @@
 trading_params:
   instrument: 'USDJPY'
   timeframe: 'M5'
-  magic_number: 100002                     # Unique identifier for USDJPY M15 instance
-  
+  magic_number: 100002 # Unique identifier for USDJPY M15 instance
+
   # Position Sizing Configuration
-  use_dynamic_sizing: true              # Enable dynamic position sizing based on account balance
-  default_risk_per_trade: 1          # Higher risk for this pair (% of account balance)
-  min_position_size: 0.01              # Minimum position size in lots
-  max_position_size_percent: 5.0       # Max position as % of balance (scales with account)
-  max_position_size_absolute: null     # Optional hard cap (null = unlimited compounding)
-  lot_size: 0.30                       # Fixed lot size (used when dynamic sizing is disabled)
-  
+  use_dynamic_sizing: true # Enable dynamic position sizing based on account balance
+  default_risk_per_trade: 1 # Lower risk for high-frequency M1 trading (% of account balance)
+  min_position_size: 0.01 # Minimum position size in lots
+  max_position_size_percent: 2.0 # Lower max position for M1 scalping
+  max_position_size_absolute: null # Optional hard cap (null = unlimited compounding)
+  lot_size: 0.25 # Fixed lot size (used when dynamic sizing is disabled)
+
   # Portfolio Risk Management (Three-Layer Protection)
-  max_risk_per_trade: 1.5              # Never exceed this per individual trade (% of account balance)
-  max_total_portfolio_risk: 5.0        # Never exceed this across all trades (% of account balance)
-  portfolio_risk_enabled: true         # Enable portfolio-level risk management
-  
+  max_risk_per_trade: 1.0 # Conservative per trade limit for M1
+  max_total_portfolio_risk: 5.0 # Never exceed this across all trades (% of account balance)
+  portfolio_risk_enabled: true # Enable portfolio-level risk management
+
   contract_size: 100000
   starting_balance: 10000
 
@@ -26,8 +26,8 @@ trading_params:
   # Cache settings
   use_cache: true
   cache_dir: 'data/cache'
-  rsi_period: 20                       # Longer RSI period for 15min timeframe
-  rsi_oversold: 30                     # Slightly different levels
+  rsi_period: 20 # Longer RSI period for 15min timeframe
+  rsi_oversold: 30 # Slightly different levels
   rsi_overbought: 70
   rsi_exit_level: 50
 
@@ -54,6 +54,7 @@ trading_params:
     strategy: 'B' # Balanced strategy for JPY pairs
     allow_runtime_changes: true
     config_check_interval: 6000 # Check for config changes every N seconds
+
 
     # Strategy Descriptions:
     # A: Breakeven@1.5 ATR, Trail@1.0 ATR, Hard Stop@2.0 ATR (Conservative)

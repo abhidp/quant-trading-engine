@@ -288,27 +288,30 @@ class RiskManager:
         # Calculate stop distance in price units
         stop_distance = abs(entry_price - stop_loss)
         
-        # Get pip value
-        pip_value = self.get_pip_value(symbol)
-        if pip_value is None:
-            self.logger.error(f"Could not get pip value for {symbol}, using minimum position size")
+        # Get pip size (not pip value!)
+        pip_size = self.get_pip_value(symbol)  # This is actually pip SIZE (0.0001 for GBPUSD)
+        if pip_size is None:
+            self.logger.error(f"Could not get pip size for {symbol}, using minimum position size")
             return min_size
         
         # Convert stop distance to pips
-        stop_distance_pips = stop_distance / pip_value
+        stop_distance_pips = stop_distance / pip_size
         
         # Calculate position size based on risk
         contract_size = symbol_info.trade_contract_size
         
-        if stop_distance_pips > 0:
-            position_size = risk_amount / (stop_distance_pips * pip_value * contract_size)
+        if stop_distance > 0:
+            # Correct position size formula: Risk amount / (Stop distance in price units * Contract size)
+            position_size = risk_amount / (stop_distance * contract_size)
         else:
             self.logger.warning("Stop distance is zero, using minimum position size")
             return min_size
         
         # Calculate dynamic maximum based on account balance percentage
-        # This represents the position size that would risk max_size_percent of account with 1 pip movement
-        dynamic_max_size = (balance * max_size_percent / 100.0) / (contract_size * pip_value)
+        # Simple approach: max_size_percent of balance converted to maximum position size in lots
+        max_position_value = balance * max_size_percent / 100.0  # 3% of $10,042 = $301.28
+        dynamic_max_size = max_position_value / (contract_size / 30.0)  # Assume 1:30 leverage
+        # With 1:30 leverage, $301.28 can control $301.28 * 30 = $9,038 notional = 0.09 lots
         
         # Apply constraints
         position_size = max(min_size, position_size)

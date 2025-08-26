@@ -5,14 +5,14 @@ trading_params:
   
   # Position Sizing Configuration
   use_dynamic_sizing: true              # Enable dynamic position sizing based on account balance
-  default_risk_per_trade: 1.0          # Normal risk per trade (% of account balance)
+  default_risk_per_trade: 1          # Lower risk for high-frequency M1 trading (% of account balance)
   min_position_size: 0.01              # Minimum position size in lots
-  max_position_size_percent: 5.0       # Max position as % of balance (scales with account)
+  max_position_size_percent: 2.0       # Lower max position for M1 scalping
   max_position_size_absolute: null     # Optional hard cap (null = unlimited compounding)
-  lot_size: 0.50                       # Fixed lot size (used when dynamic sizing is disabled)
+  lot_size: 0.25                       # Fixed lot size (used when dynamic sizing is disabled)
   
   # Portfolio Risk Management (Three-Layer Protection)
-  max_risk_per_trade: 1.5              # Never exceed this per individual trade (% of account balance)
+  max_risk_per_trade: 1.0              # Conservative per trade limit for M1
   max_total_portfolio_risk: 5.0        # Never exceed this across all trades (% of account balance)
   portfolio_risk_enabled: true         # Enable portfolio-level risk management
   

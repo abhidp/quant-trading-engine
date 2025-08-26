@@ -7,7 +7,7 @@ trading_params:
   use_dynamic_sizing: true              # Enable dynamic position sizing based on account balance
   default_risk_per_trade: 1          # Lower risk for high-frequency M1 trading (% of account balance)
   min_position_size: 0.01              # Minimum position size in lots
-  max_position_size_percent: 3.0       # Lower max position for M1 scalping
+  max_position_size_percent: 2.0       # Lower max position for M1 scalping
   max_position_size_absolute: null     # Optional hard cap (null = unlimited compounding)
   lot_size: 0.25                       # Fixed lot size (used when dynamic sizing is disabled)
   
